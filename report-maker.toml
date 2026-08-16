@@ -1,0 +1,22 @@
+# report-maker workspace.
+#
+#   report-maker new "Title"   scaffold a report
+#   report-maker all           theme, diagrams, PDFs, page images, manifest
+#   report-maker check         enforce the citation rule
+#
+# Generated theme files land in .build/ and are never edited by hand.
+
+[workspace]
+reports = "reports"
+brand   = "brand"
+out     = "out"
+
+[typst]
+bin   = "typst"
+paper = "a4"
+
+[diagrams]
+mermaid = "^11.4.2"
+
+[pages]
+ppi = 110

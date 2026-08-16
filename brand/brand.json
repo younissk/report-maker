@@ -1,0 +1,23 @@
+{
+  "$comment": [
+    "House style. Any key left out falls back to the engine default in",
+    "engine/brand/brand.json. Everything derived from this file \u2014 the Typst",
+    "tokens, the mermaid theme, the mermaid stylesheet \u2014 is generated into",
+    ".build/brand/, so a colour lives in exactly one place.",
+    "",
+    "Drop a logo in brand/assets/ and point org.logo at it as a project-absolute",
+    "path, e.g. \"/brand/assets/logo.svg\". With no logo, covers and running heads",
+    "fall back to the organisation name in display type."
+  ],
+  "org": {
+    "name": "Your Organisation",
+    "url": "example.com",
+    "logo": null
+  },
+  "colors": {
+    "accent": "#2E5A88",
+    "accent-deep": "#1C3D60",
+    "accent-bright": "#2F6FB2",
+    "accent-tint": "#EAF0F7"
+  }
+}

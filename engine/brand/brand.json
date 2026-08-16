@@ -1,0 +1,91 @@
+{
+  "$comment": [
+    "Default brand pack. A workspace overrides any subset of this in brand/brand.json;",
+    "keys not mentioned there fall back to these values.",
+    "",
+    "Everything derived from this file is generated into .build/brand/ — the Typst",
+    "tokens, the mermaid theme, and the mermaid stylesheet. Change a colour here and",
+    "the report, its diagrams and its figures all move together.",
+    "",
+    "org.logo is a project-absolute path, e.g. \"/brand/assets/logo.svg\". Leave it null",
+    "and the cover falls back to the organisation name set in display type."
+  ],
+
+  "org": {
+    "name": "Your Organisation",
+    "url": "example.com",
+    "logo": null,
+    "logo-inverse": null,
+    "logo-width": "44mm",
+    "logo-width-header": "17mm"
+  },
+
+  "colors": {
+    "accent": "#2E5A88",
+    "accent-deep": "#1C3D60",
+    "accent-bright": "#2F6FB2",
+    "accent-tint": "#EAF0F7",
+
+    "ink": "#000000",
+    "ink-soft": "#555555",
+    "ink-muted": "#666666",
+    "ink-faint": "#AAAAAA",
+
+    "rule": "#CCCCCC",
+    "rule-light": "#E0E0E0",
+    "rule-mid": "#D1D1D1",
+
+    "surface": "#FFFFFF",
+    "surface-alt": "#F6F6F6",
+
+    "positive": "#1F6F4A",
+    "positive-tint": "#EAF3EE",
+    "positive-deep": "#145035",
+    "neutral": "#6E6E6E"
+  },
+
+  "fonts": {
+    "display": ["Didot", "Bodoni 72", "Times New Roman"],
+    "text": ["Helvetica Neue", "Helvetica", "Arial"],
+    "mono": ["Menlo", "Courier New"]
+  },
+
+  "sizes": {
+    "cover-title": "34pt",
+    "cover-sub": "13pt",
+    "h1": "17pt",
+    "h2": "12.5pt",
+    "h3": "10.5pt",
+    "body": "9.8pt",
+    "small": "8.4pt",
+    "micro": "7.2pt"
+  },
+
+  "space": {
+    "xs": "3pt",
+    "sm": "6pt",
+    "md": "12pt",
+    "lg": "20pt",
+    "xl": "32pt",
+    "xxl": "52pt"
+  },
+
+  "page-margin": {
+    "top": "26mm",
+    "bottom": "24mm",
+    "x": "22mm"
+  },
+
+  "defaults": {
+    "kind": "Report",
+    "version": "1.0",
+    "classification": "Confidential",
+    "paper": "a4",
+    "bib-style": "ieee",
+    "bib-title": "References"
+  },
+
+  "mermaid": {
+    "font-size": "14px"
+  }
+}

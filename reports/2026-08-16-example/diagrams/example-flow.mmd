@@ -1,0 +1,12 @@
+%% Colour comes from the generated theme, never from this file. The only accent
+%% classes a report diagram may use are em-accent, em-muted, em-good, em-ghost.
+flowchart LR
+  src[Source material] --> read[Read and extract]
+  read --> fact["Cited fact<br/>@key"]
+  read --> op["Marked opinion<br/>#assess"]
+  fact --> doc[Report]
+  op --> doc
+
+  class fact em-accent
+  class op em-muted
+  class doc em-good
