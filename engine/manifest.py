@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from . import diagrams
+from . import diagrams, vault
 from .config import Config
 from .workspace import Report, reports
 
@@ -23,8 +23,13 @@ def entry(cfg: Config, report: Report) -> dict:
         with pages_index.open(encoding="utf-8") as handle:
             pages = json.load(handle)
 
+    template = report.template_id()
     return {
+        "id": report.id,
         "slug": report.slug,
+        "group": report.group,
+        "template": template,
+        "brand": vault.template(cfg, template).brand_pack,
         "meta": meta,
         "source": {
             "main": str(report.main.relative_to(cfg.root)),
@@ -55,15 +60,29 @@ def entry(cfg: Config, report: Report) -> dict:
     }
 
 
-def build(cfg: Config, slug: str | None = None) -> Path:
-    found = reports(cfg, slug)
+def build(cfg: Config, target: str | None = None) -> Path:
+    found = reports(cfg, target)
+    entries = [entry(cfg, r) for r in found]
     data = {
-        "workspace": str(cfg.root),
+        "vault": str(cfg.root),
         "count": len(found),
-        "reports": [entry(cfg, r) for r in found],
+        # Folders are the filing system, so the manifest publishes them: a
+        # consumer can rebuild the tree without walking the disk itself.
+        "groups": sorted({e["group"] for e in entries}),
+        "templates": {
+            tid: {
+                "title": tpl.title,
+                "group": tpl.group,
+                "description": tpl.description,
+                "brand": tpl.brand_pack,
+                "builtin": tpl.builtin,
+            }
+            for tid, tpl in vault.templates(cfg).items()
+        },
+        "reports": entries,
     }
     cfg.out.mkdir(parents=True, exist_ok=True)
-    target = cfg.out / "manifest.json"
-    target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    print(f"  → {target.relative_to(cfg.root)} ({len(found)} reports)")
-    return target
+    path = cfg.out / "manifest.json"
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print(f"  → {path.relative_to(cfg.root)} ({len(found)} reports)")
+    return path

@@ -1,8 +1,8 @@
 // The report template: cover, running chrome, contents, and the appended
 // bibliography that makes the citation rule enforceable.
 //
-//   #import "/.build/typst/report.typ": report
-//   #import "/.build/typst/components.typ": *
+//   #import "/.build/design/base/report.typ": report
+//   #import "/.build/design/base/components.typ": *
 //
 //   #show: report.with(
 //     title: "Company audit — Example Ltd",

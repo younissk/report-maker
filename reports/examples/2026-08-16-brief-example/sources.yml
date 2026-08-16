@@ -1,0 +1,21 @@
+# Hayagriva bibliography for this report.
+#
+# House rule: a statement is either cited or marked as opinion. Add the key here
+# before writing the sentence that needs it — starting the sources file before
+# the prose is what keeps the rule cheap to follow.
+#
+# Types worth knowing:
+#   Web   — a published page. Use the url/date pair so the accessed date shows.
+#   Misc  — something we did ourselves: a measurement, a probe, an interview.
+#   Report, Article, Book, Thesis — as normal.
+#
+# Every key here reaches the References section whether or not a @key points at
+# it, so the section doubles as the inventory of what was reviewed.
+
+example-page:
+  type: Web
+  title: "Example — the page title as published"
+  author: Example Ltd
+  url:
+    value: https://example.com/page
+    date: 2026-01-01

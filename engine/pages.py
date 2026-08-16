@@ -7,8 +7,8 @@ something it can actually look at.
 
 Output is data, not a viewer:
 
-    out/pages/<slug>/page-001.png …
-    out/pages/<slug>/pages.json      { slug, ppi, count, pages: [...] }
+    out/pages/<report-id>/page-1.png …
+    out/pages/<report-id>/pages.json   { id, ppi, count, pages: [...] }
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def render(cfg: Config, report: Report, ppi: int) -> list[Path]:
     )
     if result.returncode != 0:
         raise PagesError(
-            f"typst failed rendering pages for {report.slug}\n"
+            f"typst failed rendering pages for {report.id}\n"
             + (result.stdout + result.stderr).rstrip()
         )
     # Typst does not zero-pad, so page-10 sorts before page-2 lexically. The
@@ -79,6 +79,7 @@ def build_one(cfg: Config, report: Report, ppi: int, force: bool = False) -> Pat
     index.write_text(
         json.dumps(
             {
+                "id": report.id,
                 "slug": report.slug,
                 "ppi": ppi,
                 "count": len(files),
@@ -94,8 +95,8 @@ def build_one(cfg: Config, report: Report, ppi: int, force: bool = False) -> Pat
 
 
 def build(
-    cfg: Config, slug: str | None = None, ppi: int | None = None, force: bool = False
+    cfg: Config, target: str | None = None, ppi: int | None = None, force: bool = False
 ) -> list[Path]:
     ppi = ppi or cfg.ppi
     library.stage(cfg)
-    return [build_one(cfg, r, ppi, force) for r in reports(cfg, slug)]
+    return [build_one(cfg, r, ppi, force) for r in reports(cfg, target)]

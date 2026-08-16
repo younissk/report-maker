@@ -20,7 +20,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import brand
+from . import brand, vault
 from .config import Config
 from .workspace import Report, reports
 
@@ -175,7 +175,9 @@ def prepare(cfg: Config, src: Path, brand_data: dict) -> Path:
         + "\n".join(f"  classDef {name} {defs[name]}" for name in wanted)
         + "\n"
     )
-    staged = cfg.build / "mermaid" / "src" / f"{src.parent.parent.name}--{src.name}"
+    # One flat staging directory, so the name has to carry the report path.
+    rel = src.relative_to(cfg.root).as_posix().replace("/", "--")
+    staged = cfg.build / "mermaid" / "src" / rel
     staged.parent.mkdir(parents=True, exist_ok=True)
     staged.write_text(injected, encoding="utf-8")
     return staged
@@ -189,11 +191,10 @@ def sources(cfg: Config, slug: str | None) -> list[Path]:
     ]
 
 
-def _is_fresh(cfg: Config, src: Path) -> bool:
+def _is_fresh(src: Path, theme: Path) -> bool:
     out = src.with_suffix(".svg")
     if not out.exists() or out.stat().st_mtime < src.stat().st_mtime:
         return False
-    theme = cfg.build / "brand" / "mermaid"
     newest_theme = max(
         (p.stat().st_mtime for p in theme.glob("*") if p.is_file()), default=0
     )
@@ -206,14 +207,14 @@ def render(
     binary: Path,
     puppeteer: Path | None,
     force: bool,
-    brand_data: dict | None = None,
+    brand_data: dict,
+    theme: Path,
 ) -> str:
     out = src.with_suffix(".svg")
-    if not force and _is_fresh(cfg, src):
+    if not force and _is_fresh(src, theme):
         return "up to date"
 
-    staged = prepare(cfg, src, brand_data or brand.load(cfg))
-    theme = cfg.build / "brand" / "mermaid"
+    staged = prepare(cfg, src, brand_data)
     cmd = [
         str(binary),
         "--input", str(staged),
@@ -241,24 +242,37 @@ def render(
     return "rendered"
 
 
-def build(cfg: Config, slug: str | None = None, force: bool = False) -> list[Path]:
-    brand.sync(cfg)
-    files = sources(cfg, slug)
-    if not files:
-        where = f"{slug}/diagrams/" if slug else "any report's diagrams/ folder"
+def build(cfg: Config, target: str | None = None, force: bool = False) -> list[Path]:
+    """Render every diagram, each with the theme of its own report's design.
+
+    Two reports built from two designs can sit on two different brand packs, so
+    the theme is resolved per report rather than once for the vault.
+    """
+    work: list[tuple[Report, list[Path]]] = [
+        (report, sorted(report.diagrams.glob("*.mmd"))) for report in reports(cfg, target)
+    ]
+    work = [(report, files) for report, files in work if files]
+    if not work:
+        where = f"{target}/diagrams/" if target else "any report's diagrams/ folder"
         print(f"  no .mmd files in {where} — nothing to render")
         return []
 
     binary = ensure_cli(cfg)
     puppeteer = puppeteer_config(cfg)
-    brand_data = brand.load(cfg)
+    packs: dict[str, tuple[dict, Path]] = {}
     rendered = []
-    for src in files:
-        status = render(cfg, src, binary, puppeteer, force, brand_data)
-        out = src.with_suffix(".svg")
-        print(f"  → {out.relative_to(cfg.root)} ({status})")
-        if status == "rendered":
-            rendered.append(out)
+
+    for report, files in work:
+        pack = vault.template(cfg, report.template_id()).brand_pack
+        if pack not in packs:
+            packs[pack] = (brand.load(cfg, pack), brand.sync_mermaid(cfg, pack))
+        brand_data, theme = packs[pack]
+        for src in files:
+            status = render(cfg, src, binary, puppeteer, force, brand_data, theme)
+            out = src.with_suffix(".svg")
+            print(f"  → {out.relative_to(cfg.root)} ({status})")
+            if status == "rendered":
+                rendered.append(out)
     return rendered
 
 

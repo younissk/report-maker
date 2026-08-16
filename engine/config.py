@@ -5,9 +5,10 @@ engine touches is resolved from that file, so the engine itself holds no paths
 and can be vendored, symlinked, or installed anywhere.
 
     [workspace]
-    reports = "reports"     # one folder per report, YYYY-MM-DD-slug
-    brand   = "brand"       # brand.json + assets — the house style
-    out     = "out"         # PDFs, page images, manifest
+    reports   = "reports"    # report folders, nested as deep as you like
+    templates = "templates"  # designs, grouped by folder
+    brand     = "brand"      # brand packs — brand.json + assets
+    out       = "out"        # PDFs, page images, manifest
 
 Generated theme files always land in `.build/`, which is not configurable: the
 Typst library imports them by a literal path, and a Typst import cannot be
@@ -38,6 +39,7 @@ ENGINE_DIR = Path(__file__).resolve().parent
 DEFAULTS: dict = {
     "workspace": {
         "reports": "reports",
+        "templates": "templates",
         "brand": "brand",
         "out": "out",
     },
@@ -73,6 +75,10 @@ class Config:
     @property
     def reports(self) -> Path:
         return self.root / self.data["workspace"]["reports"]
+
+    @property
+    def templates(self) -> Path:
+        return self.root / self.data["workspace"]["templates"]
 
     @property
     def brand(self) -> Path:
@@ -122,9 +128,10 @@ class Config:
         rel = path.resolve().relative_to(self.root.resolve())
         return "/" + rel.as_posix()
 
-    @property
-    def tokens_path(self) -> str:
-        return self.project_path(self.build / "brand" / "tokens.typ")
+    def design_path(self, template_id: str) -> str:
+        """Where a report imports its design from. Staged, so the engine itself
+        can live outside the vault — see library.py."""
+        return f"/.build/design/{template_id}"
 
 
 def find_root(start: Path | None = None) -> Path:

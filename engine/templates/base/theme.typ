@@ -1,11 +1,11 @@
 // Design tokens plus the primitives built directly on them.
 //
-// The token values themselves are generated from brand/brand.json into
-// /.build/brand/tokens.typ by `report-maker brand` (and by every build), so a
-// colour exists in exactly one place across the Typst template, the mermaid
-// theme and the mermaid stylesheet.
+// tokens.typ next to this file is generated from the design's brand pack when
+// the design is staged, so a colour exists in exactly one place across the Typst
+// template, the mermaid theme and the mermaid stylesheet. Two designs can point
+// at two different brand packs and each gets its own tokens.
 
-#import "/.build/brand/tokens.typ": org, colors, fonts, sizes, space, page-margin, defaults
+#import "tokens.typ": org, colors, fonts, sizes, space, page-margin, defaults
 
 // Letterspaced small caps, used for labels, eyebrows and running heads.
 #let label(body, fill: colors.ink-muted, size: sizes.micro, weight: "medium") = text(

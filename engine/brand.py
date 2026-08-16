@@ -1,16 +1,17 @@
 """One brand file in, every themed artefact out.
 
-`brand/brand.json` is the single source of truth for colour, type and rhythm.
-From it this module generates, into the build directory:
+A brand pack — `brand/brand.json`, or `brand/<name>/brand.json` for a named one —
+is the single source of truth for colour, type and rhythm. From it this module
+generates:
 
-    .build/brand/tokens.typ          Typst design tokens, imported by the library
-    .build/brand/mermaid/config.json mermaid theme variables
-    .build/brand/mermaid/style.css   mermaid stroke weights and label type
+    .build/design/<template>/tokens.typ    Typst tokens, imported by that design
+    .build/mermaid/theme/<pack>/config.json  mermaid theme variables
+    .build/mermaid/theme/<pack>/style.css    mermaid stroke weights and label type
 
 They are generated rather than hand-maintained because the alternative — the
 same hex code written into a Typst file, a JSON theme and a stylesheet — drifts
 the first time somebody changes one of the three. Nothing under `.build/` should
-ever be edited; edit `brand/brand.json` and rebuild.
+ever be edited; edit the brand pack and rebuild.
 """
 
 from __future__ import annotations
@@ -29,13 +30,15 @@ class BrandError(RuntimeError):
     pass
 
 
-def load(cfg: Config) -> dict:
-    """Workspace brand, with the engine's default brand filled in underneath."""
+def load(cfg: Config, pack: str = "default") -> dict:
+    """A brand pack, with the engine's default brand filled in underneath."""
+    from . import vault  # local import: vault reads config, config knows no brands
+
     with DEFAULT_BRAND.open(encoding="utf-8") as handle:
         brand = json.load(handle)
 
-    local = cfg.brand / "brand.json"
-    if local.is_file():
+    local = vault.brand_pack(cfg, pack)
+    if local is not None and local.is_file():
         with local.open(encoding="utf-8") as handle:
             override = json.load(handle)
         for key, value in override.items():
@@ -362,7 +365,7 @@ marker path {{
 # ── sync ─────────────────────────────────────────────────────────────────────
 
 
-def _write_if_changed(path: Path, text: str) -> bool:
+def write_if_changed(path: Path, text: str) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.read_text(encoding="utf-8") == text:
         return False
@@ -370,21 +373,14 @@ def _write_if_changed(path: Path, text: str) -> bool:
     return True
 
 
-def sync(cfg: Config, verbose: bool = False) -> list[Path]:
-    """Regenerate the derived theme. Cheap and idempotent — run before any build."""
-    brand = load(cfg)
-    base = cfg.build / "brand"
-    written = []
+def mermaid_theme_dir(cfg: Config, pack: str) -> Path:
+    return cfg.build / "mermaid" / "theme" / pack
 
-    files = {
-        base / "tokens.typ": tokens_typ(brand),
-        base / "mermaid" / "config.json": json.dumps(mermaid_config(brand), indent=2)
-        + "\n",
-        base / "mermaid" / "style.css": mermaid_css(brand),
-    }
-    for path, text in files.items():
-        if _write_if_changed(path, text):
-            written.append(path)
-            if verbose:
-                print(f"  → {path.relative_to(cfg.root)}")
-    return written
+
+def sync_mermaid(cfg: Config, pack: str = "default") -> Path:
+    """Generate one pack's mermaid theme, and return the directory holding it."""
+    data = load(cfg, pack)
+    target = mermaid_theme_dir(cfg, pack)
+    write_if_changed(target / "config.json", json.dumps(mermaid_config(data), indent=2) + "\n")
+    write_if_changed(target / "style.css", mermaid_css(data))
+    return target

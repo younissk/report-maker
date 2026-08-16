@@ -1,0 +1,9 @@
+title = "Brief"
+description = "Two-to-six pages, no cover and no contents: a letterhead, then straight into the argument."
+kind = "Brief"
+
+# Inherits theme.typ and components.typ from the base design, and replaces only
+# report.typ — which is the whole point of extends: a new design is the delta,
+# not a fork.
+extends = "base"
+brand = "default"

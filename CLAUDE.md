@@ -1,8 +1,18 @@
 # report-maker — repository instructions
 
-A headless report engine. Reports are Typst, built by `engine/`, which is pure
-Python and has no third-party dependencies. See [README.md](README.md) for the
-commands and [engine/README.md](engine/README.md) for the internals.
+A headless report engine over a folder-based vault. Reports are Typst, built by
+`engine/`, which is pure Python and has no third-party dependencies. See
+[README.md](README.md) for the commands and [engine/README.md](engine/README.md)
+for the internals.
+
+Folders are the data model, and there is no index to keep in sync:
+
+- `reports/<any/nesting>/<YYYY-MM-DD-slug>/` — the path is the report id, the
+  folders above it are its group, and `out/` mirrors the same shape.
+- `templates/<group…>/<name>/` — a design. Nesting groups it. A vault design
+  shadows a built-in of the same id.
+- `brand/brand.json` plus `brand/<name>/brand.json` — brand packs. A design
+  names the one it uses in its `template.toml`.
 
 ## The citation rule
 
@@ -45,27 +55,34 @@ before calling a report finished; `report-maker all` runs it last.
 ## Building
 
 ```bash
-make                       # theme, diagrams, PDFs, page images, manifest, check
-make R=<slug>              # narrow to one report
-make new T="Title"         # scaffold a report
+make                       # stage, diagrams, PDFs, page images, manifest, check
+make R=<target>            # narrow to one report, or to a folder of them
+make new T="Title" G=clients/acme TPL=brief    # scaffold a report
+make templates             # the designs available
+make design ID=audits/company FROM=base        # an editable design
 make check                 # the citation rule alone
 make test                  # engine unit tests
 ```
 
 There is no preview server and no HTML viewer, by design — every command is
-headless. To read a built report, open `out/<slug>.pdf`, or look at the page
-PNGs in `out/pages/<slug>/`, which is also how an agent or an embedded browser
-that cannot render a PDF should read it.
+headless. To read a built report, open `out/<report-id>.pdf`, or look at the
+page PNGs in `out/pages/<report-id>/`, which is also how an agent or an embedded
+browser that cannot render a PDF should read it.
 
 ## Conventions
 
-- One folder per report, named `YYYY-MM-DD-kebab-slug`, containing `main.typ`
-  and `sources.yml`. Folders starting with `_` are not built.
-- Reports import the staged library — `/.build/typst/report.typ` — and reference
-  their own files by project-absolute paths. A relative path in a report breaks
-  the moment the folder moves.
-- Design tokens live in `brand/brand.json` and nowhere else. Never write a hex
-  code into a `.typ` or `.mmd` file: diagrams use the emphasis classes
+- One folder per report, named `YYYY-MM-DD-kebab-slug`, filed under whatever
+  folders make sense, containing `main.typ` and `sources.yml`. Folders starting
+  with `_` or `.` are not built.
+- Reports import their design from `/.build/design/<template-id>/report.typ`, and
+  reference their own files by project-absolute paths. A relative path in a
+  report breaks the moment the folder moves. That import line is also the record
+  of which design the report uses — do not rewrite it by hand without moving the
+  report to a design that exists.
+- A new design is a delta, not a fork: set `extends` in its `template.toml` and
+  override only the Typst files that actually differ.
+- Design tokens live in a brand pack and nowhere else. Never write a hex code
+  into a `.typ` or `.mmd` file: diagrams use the emphasis classes
   `em-accent`, `em-muted`, `em-good`, `em-ghost`, and the engine injects the
   matching `classDef`s from the brand at render time.
 - `htmlLabels` must stay `false` in the mermaid config, or Typst renders the

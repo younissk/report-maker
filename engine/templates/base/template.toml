@@ -1,0 +1,10 @@
+title = "Base report"
+description = "The house design: full cover, contents, findings, scorecards, appended references."
+kind = "Report"
+
+# The root of the design tree — it inherits nothing, and every other template
+# falls back to it for any Typst file it does not define itself.
+extends = ""
+
+# Which brand pack under brand/ this design draws its tokens from.
+brand = "default"

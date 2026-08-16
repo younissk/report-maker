@@ -214,8 +214,8 @@ def check_report(cfg: Config, report: Report) -> list[Finding]:
     return out
 
 
-def check(cfg: Config, slug: str | None = None) -> list[Finding]:
-    return [f for report in reports(cfg, slug) for f in check_report(cfg, report)]
+def check(cfg: Config, target: str | None = None) -> list[Finding]:
+    return [f for report in reports(cfg, target) for f in check_report(cfg, report)]
 
 
 def report_findings(cfg: Config, findings: list[Finding]) -> int:

@@ -61,16 +61,16 @@ def compile_report(cfg: Config, report: Report, force: bool = False) -> Path:
     return report.pdf
 
 
-def build(cfg: Config, slug: str | None = None, force: bool = False) -> list[Path]:
+def build(cfg: Config, target: str | None = None, force: bool = False) -> list[Path]:
     library.stage(cfg)
-    return [compile_report(cfg, r, force) for r in reports(cfg, slug)]
+    return [compile_report(cfg, r, force) for r in reports(cfg, target)]
 
 
-def watch(cfg: Config, slug: str) -> int:
+def watch(cfg: Config, target: str) -> int:
     """Live rebuild of one report. The only long-running command in the engine."""
     library.stage(cfg)
     binary = _require_typst(cfg)
-    report = reports(cfg, slug)[0]
+    report = reports(cfg, target)[0]
     report.pdf.parent.mkdir(parents=True, exist_ok=True)
     return subprocess.run(
         [

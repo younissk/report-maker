@@ -1,26 +1,26 @@
-// 2026-08-16-example
+// {{slug}}
 //
 // House rule: something is either cited, or it is an opinion. Facts carry a
 // @key into sources.yml. Judgements carry #assess, or sit in assessment[…].
 // Tables, figures and images go through srcfig / srcimage / diagram, which
 // cannot be written without a source. `report-maker check` enforces all of it.
 
-#import "/.build/typst/report.typ": report
-#import "/.build/typst/components.typ": *
+#import "{{design}}/report.typ": report
+#import "{{design}}/components.typ": *
 
 #show: report.with(
-  title: "Example report",
+  title: "{{title}}",
   subtitle: "A one-line description of what this document establishes, and for whom.",
-  kind: "Report",
-  author: "Youniss Kandah",
+  kind: "{{kind}}",
+  author: "{{author}}",
   role: "Role",
-  date: datetime(year: 2026, month: 8, day: 16),
+  date: {{date}},
   subject: "Subject of the report",
-  doc-id: "RM-2026-001",
+  doc-id: "{{doc_id}}",
   version: "0.1 — Draft",
   classification: "Internal",
   // Project-absolute — it resolves against the workspace root, not this file.
-  sources: "/reports/2026-08-16-example/sources.yml",
+  sources: "{{sources}}",
   abstract: [
     Two or three sentences stating the question, the method, and the answer.
     This paragraph appears on the cover, so keep it self-contained.
@@ -99,18 +99,21 @@ ones their own block:
   source: [none — assessment, not evidence],
 )
 
-#diagram(
-  "/reports/2026-08-16-example/diagrams/example-flow.svg",
-  caption: [Every statement in a report takes one of these two exits.],
-  source: [none — assessment, not evidence],
-  alt: "Source material is read, then either cited as fact or marked as opinion, and both reach the report",
-  width: 90%,
-)
-
+// A diagram is written as mermaid in diagrams/*.mmd, rendered by
+// `report-maker diagrams`, and placed here. It is a figure, so it is cited like
+// one — either it depicts something we were told, or it depicts our own model:
+//
+// #diagram(
+//   "{{report_path}}/diagrams/example-flow.svg",
+//   caption: [What the reader should take from it.],
+//   source: [none — assessment, not evidence],
+//   alt: "Description for a reader who cannot see the diagram",
+// )
+//
 // An image needs a source and alt text, the same as everything else:
 //
 // #srcimage(
-//   "/reports/2026-08-16-example/figure.png",
+//   "{{report_path}}/figure.png",
 //   caption: [What the reader should take from it.],
 //   source: [@example-page],
 //   alt: "Description for a reader who cannot see the image",
