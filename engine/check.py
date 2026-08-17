@@ -116,11 +116,22 @@ def bib_keys(path: Path) -> set[str]:
 def cited_keys(src: str) -> list[tuple[str, int]]:
     # Typst ends a `@key` reference before trailing punctuation, so `@page.` cites
     # `page` and prints the full stop. Match the same way, or every citation that
-    # ends a sentence reads as undefined.
+    # ends a sentence reads as undefined. A backslash escapes the marker — `\@djeed`
+    # is the literal text of a social handle, not a citation.
     return [
         (match.group(1).rstrip(".:+-"), match.start())
-        for match in re.finditer(r"(?<![\w@])@([A-Za-z][\w.:+-]*)", src)
+        for match in re.finditer(r"(?<![\w@\\])@([A-Za-z][\w.:+-]*)", src)
     ]
+
+
+def labels(src: str) -> set[str]:
+    """Labels the document defines itself, as `… <fig-timing>`.
+
+    Typst spells a cross-reference and a citation the same way: `@fig-timing`
+    points at a figure in this document, `@djeed-home` points at a bibliography
+    entry. Only the label set can tell them apart, so it has to be read before any
+    `@key` is called undefined."""
+    return {match.group(1) for match in re.finditer(r"<([A-Za-z][\w.:-]*)>", src)}
 
 
 # ── rules ────────────────────────────────────────────────────────────────────
@@ -177,16 +188,17 @@ def check_report(cfg: Config, report: Report) -> list[Finding]:
 
     # E006/W001 — citations and the bibliography must agree.
     keys = bib_keys(report.sources)
+    defined = labels(raw)
     cited = cited_keys(src)
     for key, index in cited:
-        if keys and key not in keys:
+        if keys and key not in keys and key not in defined:
             add(
                 "error",
                 "E006",
                 index,
                 f"@{key} is not defined in {report.sources.name}",
             )
-    used = {key for key, _ in cited}
+    used = {key for key, _ in cited} - defined
     for key in sorted(keys - used):
         out.append(
             Finding(

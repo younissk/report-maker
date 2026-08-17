@@ -228,6 +228,21 @@ class TestCheck(Vault):
         report = self.write_report("r", self.HEAD + "A fact @example-page.\n", self.BIB)
         self.assertNotIn("E006", self.codes(report))
 
+    def test_a_cross_reference_is_not_a_citation(self) -> None:
+        # Typst spells both `@key`. A reference to a label this document defines
+        # points at a figure, not at the bibliography.
+        report = self.write_report(
+            "r",
+            self.HEAD + "See @fig-one.\n#srcfig(table([a]), caption: [c], source: [@example-page]) <fig-one>\n",
+            self.BIB,
+        )
+        self.assertNotIn("E006", self.codes(report))
+
+    def test_an_escaped_at_sign_is_not_a_citation(self) -> None:
+        # `\@djeed` is the literal text of a handle.
+        report = self.write_report("r", self.HEAD + "The handle \\@djeed does not exist.\n", self.BIB)
+        self.assertNotIn("E006", self.codes(report))
+
     def test_commented_and_raw_code_is_not_scanned(self) -> None:
         report = self.write_report(
             "r",
