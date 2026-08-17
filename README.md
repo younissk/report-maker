@@ -202,6 +202,21 @@ that way.
 it: every report with its id, group, design, brand pack, metadata, artefacts and
 staleness, plus the template registry and the list of groups.
 
+## The desktop shell
+
+`app/` is an Electron front end over the same CLI: a vault switcher, a file tree,
+a CodeMirror editor, and Chromium's PDF viewer side by side.
+
+```bash
+make app          # dev, with hot reload (installs its deps on first run)
+make app-smoke    # build it, screenshot the window, exit — its own smoke test
+```
+
+It holds no logic and no state beyond the list of folders you have opened: every
+question it asks about a vault is a `report-maker` subprocess, so the app can
+never disagree with the CLI. `⌘S` saves, `⌘B` saves and builds the report the open
+file belongs to, then reloads the PDF. See [app/README.md](app/README.md).
+
 ## Requirements
 
 - **Typst** — required. `brew install typst`.

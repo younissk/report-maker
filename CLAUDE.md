@@ -64,8 +64,13 @@ make check                 # the citation rule alone
 make test                  # engine unit tests
 ```
 
-There is no preview server and no HTML viewer, by design — every command is
-headless. To read a built report, open `out/<report-id>.pdf`, or look at the
+The desktop shell in `app/` (`make app`) is a front end over these same commands
+— it shells out to the CLI for everything and stores nothing but the list of
+vaults you have opened. Never move logic into it; add it to `engine/` and let the
+app call it.
+
+The engine itself has no preview server and no HTML viewer, by design — every
+command is headless. To read a built report, open `out/<report-id>.pdf`, or look at the
 page PNGs in `out/pages/<report-id>/`, which is also how an agent or an embedded
 browser that cannot render a PDF should read it.
 
