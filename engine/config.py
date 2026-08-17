@@ -1,10 +1,11 @@
-"""Workspace discovery and configuration.
+"""Vault discovery and configuration.
 
-A *workspace* is any directory containing `report-maker.toml`. Everything the
-engine touches is resolved from that file, so the engine itself holds no paths
-and can be vendored, symlinked, or installed anywhere.
+A *vault* is any folder containing `report-maker.toml` — the way an Obsidian vault
+is any folder containing `.obsidian`. It holds the reports, the designs and the
+brand packs; the engine holds none of them, so one installation serves every
+vault on the machine and a vault can be moved, copied or synced on its own.
 
-    [workspace]
+    [vault]
     reports   = "reports"    # report folders, nested as deep as you like
     templates = "templates"  # designs, grouped by folder
     brand     = "brand"      # brand packs — brand.json + assets
@@ -37,7 +38,7 @@ CONFIG_NAME = "report-maker.toml"
 ENGINE_DIR = Path(__file__).resolve().parent
 
 DEFAULTS: dict = {
-    "workspace": {
+    "vault": {
         "reports": "reports",
         "templates": "templates",
         "brand": "brand",
@@ -65,7 +66,7 @@ def _merge(base: dict, over: dict) -> dict:
 
 @dataclass
 class Config:
-    """Resolved absolute paths for one workspace."""
+    """Resolved absolute paths for one vault."""
 
     root: Path
     data: dict = field(default_factory=dict)
@@ -74,19 +75,19 @@ class Config:
 
     @property
     def reports(self) -> Path:
-        return self.root / self.data["workspace"]["reports"]
+        return self.root / self.data["vault"]["reports"]
 
     @property
     def templates(self) -> Path:
-        return self.root / self.data["workspace"]["templates"]
+        return self.root / self.data["vault"]["templates"]
 
     @property
     def brand(self) -> Path:
-        return self.root / self.data["workspace"]["brand"]
+        return self.root / self.data["vault"]["brand"]
 
     @property
     def out(self) -> Path:
-        return self.root / self.data["workspace"]["out"]
+        return self.root / self.data["vault"]["out"]
 
     @property
     def build(self) -> Path:
@@ -119,7 +120,7 @@ class Config:
     # ── project-absolute Typst paths
     #
     # Typst resolves a leading "/" against `--root`, which is always the
-    # workspace root here. Report sources therefore reference the engine, the
+    # vault root here. Report sources therefore reference the engine, the
     # generated theme, and their own sources.yml by these paths, and never by a
     # relative one — a relative path in a report would break the moment the
     # report folder moved.
@@ -141,8 +142,10 @@ def find_root(start: Path | None = None) -> Path:
         if (candidate / CONFIG_NAME).is_file():
             return candidate
     raise ConfigError(
-        f"no {CONFIG_NAME} found in {here} or any parent directory. "
-        "Run `report-maker init` to create a workspace here."
+        f"no {CONFIG_NAME} found in {here} or any parent directory.\n"
+        "  A vault is any folder holding that file. Point at one with "
+        "`report-maker -C <vault> …`,\n"
+        "  or create one with `report-maker init` inside the folder you want to use."
     )
 
 

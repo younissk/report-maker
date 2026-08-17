@@ -1,17 +1,31 @@
 # report-maker
 
-A headless engine for evidence-grade reports. A folder-based vault in; branded
-PDFs, page images, rendered diagrams and a JSON manifest out. No database, no
-server, no viewer, no prompts — every command reads files and writes files, so
-the same code runs from a shell, a Makefile, CI, or an agent.
+A headless engine for evidence-grade reports, plus a desktop app over it. A
+folder-based **vault** in; branded PDFs, page images, rendered diagrams and a JSON
+manifest out. No database, no server, no prompts — every command reads files and
+writes files, so the same code runs from a shell, a Makefile, CI, or an agent.
 
 It enforces one rule: **something is either cited, or it is an opinion.**
 
+## Install, then make a vault
+
+This repository is the *tool*. Your reports live in a vault: any folder holding
+`report-maker.toml`, anywhere on your disk — the way an Obsidian vault is any
+folder holding `.obsidian`. One installation serves every vault on the machine.
+
 ```bash
-brew install typst          # the only hard dependency
-./bin/report-maker doctor   # what is installed, what is missing
-make                        # stage, diagrams, PDFs, page images, manifest, check
+brew install typst                              # the only hard dependency
+ln -s "$PWD/bin/report-maker" ~/.local/bin/      # put the CLI on PATH
+report-maker doctor                              # what is installed, what is missing
+
+mkdir ~/Documents/Reports && cd ~/Documents/Reports
+report-maker init                                # this folder is now a vault
+report-maker new "Company audit — Example Ltd"
+report-maker all
 ```
+
+Or open the desktop app and click **Create a vault…** — same scaffolding, same
+engine. `examples/demo-vault/` is a sample vault this repo ships for development.
 
 ## The vault
 
@@ -19,27 +33,39 @@ Everything is a folder, and the folder structure *is* the data model. There is
 nothing else to keep in sync.
 
 ```
-report-maker.toml            marks the vault root
-reports/                     nests as deep as you like — the path is the id
-  clients/acme/2026-08-12-audit/   main.typ · sources.yml · diagrams/*.mmd
-  internal/q3/2026-08-01-review/
-templates/                   designs — nesting groups them
-  audits/company/            template.toml · report.typ · starter/
-  audits/quick/
-brand/                       brand packs
-  brand.json                 the default pack
-  assets/
-  mono/brand.json            a second pack, named "mono"
-out/                         PDFs, page PNGs, manifest.json     (generated)
-.build/                      staged designs + themes            (generated)
-engine/                      the engine itself — no vault state
+~/Documents/Reports/             ← a vault; the repo is not one
+  report-maker.toml              marks the vault root
+  reports/                       nests as deep as you like — the path is the id
+    clients/acme/2026-08-12-audit/   main.typ · sources.yml · diagrams/*.mmd
+    internal/q3/2026-08-01-review/
+  templates/                     designs — nesting groups them
+    audits/company/              template.toml · report.typ · starter/
+    audits/quick/
+  brand/                         brand packs
+    brand.json                   the default pack
+    assets/
+    mono/brand.json              a second pack, named "mono"
+  out/                           PDFs, page PNGs, manifest.json     (generated)
+  .build/                        staged designs + themes            (generated)
 ```
 
 `out/` mirrors the report tree: `reports/clients/acme/2026-08-12-audit/` builds
 to `out/clients/acme/2026-08-12-audit.pdf` and
 `out/pages/clients/acme/2026-08-12-audit/`.
 
-The engine holds no state. Point it at any vault: `report-maker -C ~/work/vault all`.
+Commands run against the nearest vault above the working directory, or the one
+named with `-C`: `report-maker -C ~/work/vault all`. The engine keeps no state of
+its own, so nothing in this repository knows or cares which vaults exist.
+
+### This repository
+
+```
+bin/report-maker      the CLI entry point
+engine/               the engine — Python, standard library only
+app/                  the desktop app (Electron)
+examples/demo-vault/  a sample vault, for development and the app's smoke test
+tests/                engine unit tests
+```
 
 ## Designs
 
@@ -116,6 +142,7 @@ under it. `make` wraps every command; `R=<target>` narrows it.
 ## Writing a report
 
 ```bash
+cd ~/Documents/Reports
 report-maker new "Company audit — Example Ltd" --into clients/example --template base
 ```
 
@@ -202,7 +229,7 @@ that way.
 it: every report with its id, group, design, brand pack, metadata, artefacts and
 staleness, plus the template registry and the list of groups.
 
-## The desktop shell
+## The desktop app
 
 `app/` is an Electron front end over the same CLI: a vault switcher, a file tree,
 a CodeMirror editor, and Chromium's PDF viewer side by side.
@@ -212,10 +239,12 @@ make app          # dev, with hot reload (installs its deps on first run)
 make app-smoke    # build it, screenshot the window, exit — its own smoke test
 ```
 
-It holds no logic and no state beyond the list of folders you have opened: every
-question it asks about a vault is a `report-maker` subprocess, so the app can
-never disagree with the CLI. `⌘S` saves, `⌘B` saves and builds the report the open
-file belongs to, then reloads the PDF. See [app/README.md](app/README.md).
+It opens with **no vault**, like an editor with no document: open a folder, or
+create one anywhere on your disk. It holds no logic and no state beyond the list
+of folders you have opened — every question it asks about a vault is a
+`report-maker` subprocess, so it can never disagree with the CLI. `⌘S` saves, `⌘B`
+saves and builds the report the open file belongs to, then reloads the PDF. See
+[app/README.md](app/README.md).
 
 ## Requirements
 
@@ -228,7 +257,9 @@ file belongs to, then reloads the PDF. See [app/README.md](app/README.md).
 ## Tests
 
 ```bash
-make test
+make test                      # engine
+make app-build                 # the app: typecheck both projects + bundle
+make app-smoke                 # the app: launch it and screenshot the window
 ```
 
 They cover vault discovery, theme generation and the citation linter — the

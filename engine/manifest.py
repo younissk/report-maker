@@ -1,4 +1,4 @@
-"""out/manifest.json — the machine-readable index of the workspace.
+"""out/manifest.json — the machine-readable index of the vault.
 
 The engine emits no HTML and starts no server: whatever consumes these reports
 — a site build, an agent, a CI job, an upload script — reads this file and finds

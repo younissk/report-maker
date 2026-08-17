@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Hammer, RefreshCw, Save, ShieldCheck } from 'lucide-react'
-import type { Node, ReportRow, VaultList } from '../../shared/types'
+import type { Node, OpenResult, ReportRow, VaultList } from '../../shared/types'
 import { Editor } from './components/Editor'
 import { FileTree } from './components/FileTree'
 import { VaultSwitcher } from './components/VaultSwitcher'
 import { Viewer } from './components/Viewer'
+import { Welcome } from './components/Welcome'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -20,6 +21,7 @@ export function App() {
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const [revision, setRevision] = useState(0)
+  const [engineAt, setEngineAt] = useState('locating…')
 
   const vault = list.current
 
@@ -41,6 +43,7 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    window.api.engine.where().then(setEngineAt)
     window.api.vaults.list().then(async (loaded) => {
       setList(loaded)
       await refresh(loaded.current)
@@ -60,18 +63,31 @@ export function App() {
     [refresh]
   )
 
-  const openVault = useCallback(async () => {
-    const result = await window.api.vaults.open()
-    if (!result.ok) {
-      if (result.reason !== 'cancelled') setStatus(result.reason)
-      return
-    }
-    setList(result.list)
-    setOpenPath(null)
-    setText('')
-    setDirty(false)
-    await refresh(result.list.current)
-  }, [refresh])
+  const adopt = useCallback(
+    async (result: OpenResult) => {
+      if (!result.ok) {
+        if (result.reason !== 'cancelled') setStatus(result.reason)
+        return
+      }
+      setList(result.list)
+      setOpenPath(null)
+      setText('')
+      setDirty(false)
+      setStatus('')
+      await refresh(result.list.current)
+    },
+    [refresh]
+  )
+
+  const openVault = useCallback(
+    async () => adopt(await window.api.vaults.open()),
+    [adopt]
+  )
+
+  const createVault = useCallback(
+    async () => adopt(await window.api.vaults.create()),
+    [adopt]
+  )
 
   // Opening a vault to an empty editor wastes the first click: the common case is
   // that you came here to write the report you were last writing.
@@ -163,10 +179,26 @@ export function App() {
 
   // ── layout
 
+  if (!vault) {
+    return (
+      <Welcome
+        onOpen={openVault}
+        onCreate={createVault}
+        engine={engineAt}
+        error={status || undefined}
+      />
+    )
+  }
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3 pl-20">
-        <VaultSwitcher list={list} onSelect={switchVault} onOpen={openVault} />
+        <VaultSwitcher
+          list={list}
+          onSelect={switchVault}
+          onOpen={openVault}
+          onCreate={createVault}
+        />
         <Separator orientation="vertical" className="mx-1 h-5" />
         <Button variant="secondary" size="sm" className="h-7 gap-1.5 text-xs" disabled={!vault || busy} onClick={build}>
           <Hammer className="size-3.5" />

@@ -17,11 +17,14 @@ only exists because writing a report is nicer with a live rebuild.
     report-maker check [target]       enforce the citation rule
     report-maker all [target]         stage, diagrams, build, pages, manifest, check
     report-maker watch <target>       live rebuild while writing
+    report-maker doctor               what is installed, what is missing
+    report-maker clean                remove out/ and .build/
+
+Every command runs against one vault: the folder holding report-maker.toml, found
+by walking up from the working directory, or named outright with -C/--vault.
 
 A target is a report id, a bare slug, or a folder — `build clients/acme` builds
 every report filed under it.
-    report-maker doctor               what is installed, what is missing
-    report-maker clean                remove out/ and .build/
 """
 
 from __future__ import annotations
@@ -47,14 +50,14 @@ from .workspace import reports
 
 
 def _config(args) -> Config:
-    return load(Path(args.workspace) if args.workspace else None)
+    return load(Path(args.vault) if args.vault else None)
 
 
 # ── commands ─────────────────────────────────────────────────────────────────
 
 
 def cmd_init(args) -> int:
-    scaffold.init(Path(args.workspace or ".").resolve(), force=args.force)
+    scaffold.init(Path(args.vault or ".").resolve(), force=args.force)
     print("\nVault ready. Next: report-maker new \"My first report\"")
     return 0
 
@@ -227,7 +230,7 @@ def cmd_all(args) -> int:
     try:
         diagrams_mod.build(cfg, args.target, force=args.force)
     except diagrams_mod.DiagramError as exc:
-        # A workspace with no diagrams should not need Node installed at all.
+        # A vault with no diagrams should not need Node installed at all.
         print(f"  skipped: {exc}", file=sys.stderr)
     print("build")
     build_mod.build(cfg, args.target, force=args.force)
@@ -265,10 +268,10 @@ def cmd_clean(args) -> int:
 def cmd_doctor(args) -> int:
     try:
         cfg = _config(args)
-        print(f"  workspace   {cfg.root}")
+        print(f"  vault       {cfg.root}")
         print(f"  reports     {len(reports(cfg))} in {cfg.reports.relative_to(cfg.root)}/")
     except ConfigError as exc:
-        print(f"  workspace   none ({exc.args[0].splitlines()[0]})")
+        print(f"  vault       none ({exc.args[0].splitlines()[0]})")
         cfg = None
 
     typst = shutil.which(cfg.typst if cfg else "typst")
@@ -300,8 +303,9 @@ def parser() -> argparse.ArgumentParser:
         epilog=__doc__.split("\n", 2)[2],
     )
     ap.add_argument(
-        "-C", "--workspace", metavar="DIR",
-        help=f"directory to run in (any parent holding {CONFIG_NAME})",
+        "-C", "--vault", metavar="DIR",
+        help=f"the vault to work in (a folder holding {CONFIG_NAME}); "
+             "without it, the nearest vault above the working directory",
     )
     sub = ap.add_subparsers(dest="command", required=True)
 
@@ -312,7 +316,7 @@ def parser() -> argparse.ArgumentParser:
             p.add_argument("target", nargs="?", help=TARGET_HELP)
         return p
 
-    p = sub.add_parser("init", help="make a directory into a vault")
+    p = sub.add_parser("init", help="make a folder into a vault")
     p.add_argument("--force", action="store_true", help="overwrite existing files")
     p.set_defaults(func=cmd_init)
 

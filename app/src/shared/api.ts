@@ -12,6 +12,7 @@ export interface Api {
   vaults: {
     list(): Promise<VaultList>
     open(): Promise<OpenResult>
+    create(): Promise<OpenResult>
     select(path: string): Promise<VaultList>
     forget(path: string): Promise<VaultList>
   }
@@ -27,6 +28,9 @@ export interface Api {
     run(vault: string, args: string[]): Promise<Run>
     json<T>(vault: string, args: string[]): Promise<T>
     manifest<T>(vault: string): Promise<T | null>
+    /** Where the engine was found, for the status bar and for diagnosing a
+     *  machine that has the app but not the CLI. */
+    where(): Promise<string>
   }
   platform: string
 }

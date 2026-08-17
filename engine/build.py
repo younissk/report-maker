@@ -1,6 +1,6 @@
 """Typst compilation.
 
-`typst compile --root <workspace>` is the whole build. `--root` matters: report
+`typst compile --root <vault>` is the whole build. `--root` matters: report
 sources reference the engine library, the generated theme and their own
 `sources.yml` by project-absolute paths, and Typst resolves those against the
 root. Compiling with the wrong root fails on the first import.

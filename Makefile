@@ -1,74 +1,86 @@
-# report-maker
+# report-maker — engine + desktop app
 #
-#   make                       stage, diagrams, PDFs, page images, manifest, check
-#   make new T="Title"         scaffold a report      (G=folder  TPL=design)
-#   make list                  reports, grouped by folder
-#   make templates             designs, grouped by folder
-#   make design ID=<id>        create an editable design (FROM=<id>)
-#   make build R=<target>      one report, a folder, or all (R works on most targets)
-#   make check                 enforce the citation rule
-#   make watch R=<target>      live rebuild while writing
-#   make doctor                what is installed, what is missing
-#   make test                  engine unit tests
-#   make app                   the desktop shell (editor, viewer, file tree)
-#   make app-smoke             build the app, screenshot it, exit
-#   make clean                 remove out/ and generated .build/ files
+# This repository is the tool, not a vault. A vault is a folder somewhere on your
+# disk holding report-maker.toml; every report command runs against one:
+#
+#   make build V=~/Documents/Reports          one vault
+#   make V=~/Documents/Reports                everything, that vault
+#
+# V defaults to examples/demo-vault, the sample vault this repo ships for
+# development and for the app's smoke test.
+#
+#   make new T="Title" V=<vault>   scaffold a report   (G=folder  TPL=design)
+#   make list V=<vault>            reports, grouped by folder
+#   make templates V=<vault>       designs, grouped by folder
+#   make design ID=<id> V=<vault>  create an editable design (FROM=<id>)
+#   make check V=<vault>           enforce the citation rule
+#   make watch R=<target>          live rebuild while writing
+#   make doctor                    what is installed, what is missing
+#   make test                      engine unit tests
+#   make app                       the desktop app (opens with no vault)
+#   make app-smoke                 build the app, screenshot it, exit
+#   make clean V=<vault>           remove that vault's out/ and generated .build/
 #
 # Every target is a thin call into engine/ — the Makefile adds no behaviour, so
 # CI and agents can call `report-maker` directly and get identical results.
 
-RM  ?= ./bin/report-maker
+V   ?= examples/demo-vault
+CLI ?= ./bin/report-maker
 PY  ?= python3
+
+# `RM` is a GNU make built-in (rm -f) and cannot be reused here — a recipe
+# written as `$(VAULT) doctor` silently expands to `rm -f doctor`.
+VAULT = $(CLI) -C $(V)
 
 .PHONY: all new list templates design stage diagrams build pages manifest check watch doctor test app app-build app-smoke app-deps clean help
 
 all:
-	@$(RM) all $(R)
+	@$(VAULT) all $(R)
 
 new:
-	@test -n "$(T)" || { echo 'usage: make new T="Report title" [G=clients/acme] [TPL=brief]'; exit 1; }
-	@$(RM) new "$(T)" $(if $(G),--into $(G),) $(if $(TPL),--template $(TPL),)
+	@test -n "$(T)" || { echo 'usage: make new T="Report title" [V=<vault>] [G=clients/acme] [TPL=brief]'; exit 1; }
+	@$(VAULT) new "$(T)" $(if $(G),--into $(G),) $(if $(TPL),--template $(TPL),)
 
 list:
-	@$(RM) list $(R)
+	@$(VAULT) list $(R)
 
 templates:
-	@$(RM) templates
+	@$(VAULT) templates
 
 design:
-	@test -n "$(ID)" || { echo 'usage: make design ID=audits/company [FROM=base]'; exit 1; }
-	@$(RM) template new $(ID) $(if $(FROM),--from $(FROM),)
+	@test -n "$(ID)" || { echo 'usage: make design ID=audits/company [FROM=base] [V=<vault>]'; exit 1; }
+	@$(VAULT) template new $(ID) $(if $(FROM),--from $(FROM),)
 
 stage:
-	@$(RM) stage
+	@$(VAULT) stage
 
 diagrams:
-	@$(RM) diagrams $(R) $(if $(FORCE),--force,)
+	@$(VAULT) diagrams $(R) $(if $(FORCE),--force,)
 
 build:
-	@$(RM) build $(R) $(if $(FORCE),--force,)
+	@$(VAULT) build $(R) $(if $(FORCE),--force,)
 
 pages:
-	@$(RM) pages $(R) $(if $(PPI),--ppi $(PPI),) $(if $(FORCE),--force,)
+	@$(VAULT) pages $(R) $(if $(PPI),--ppi $(PPI),) $(if $(FORCE),--force,)
 
 manifest:
-	@$(RM) manifest
+	@$(VAULT) manifest
 
 check:
-	@$(RM) check $(R)
+	@$(VAULT) check $(R)
 
 watch:
-	@test -n "$(R)" || { echo 'usage: make watch R=<report>'; exit 1; }
-	@$(RM) watch $(R)
+	@test -n "$(R)" || { echo 'usage: make watch R=<report> [V=<vault>]'; exit 1; }
+	@$(VAULT) watch $(R)
 
 doctor:
-	@$(RM) doctor
+	@$(VAULT) doctor
 
 test:
 	@$(PY) -m unittest discover -s tests -v
 
-# The desktop shell is optional: it shells out to the same CLI, so nothing here
-# depends on it. `npm install` runs on first use only.
+# The desktop app is optional: it shells out to the same CLI, so nothing else
+# here depends on it. `npm install` runs on first use only.
 app: app-deps
 	@cd app && npm run dev
 
@@ -82,7 +94,7 @@ app-deps:
 	@test -d app/node_modules || (cd app && npm install --no-audit --no-fund)
 
 clean:
-	@$(RM) clean
+	@$(VAULT) clean
 
 help:
-	@$(RM) --help
+	@$(CLI) --help

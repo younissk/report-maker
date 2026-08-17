@@ -1,13 +1,19 @@
 # app/
 
-A desktop shell over the engine: vault switcher, file tree, editor, PDF viewer.
+A desktop app over the engine: vault switcher, file tree, editor, PDF viewer.
+
+It ships with no vault, the way an editor ships with no document. First run shows
+**Open a vault…** / **Create a vault…**; a vault is any folder holding
+`report-maker.toml`, anywhere on the disk, and the app remembers the ones you have
+opened (a JSON file in userData — nothing else).
 
 ```bash
 cd app
 npm install
-npm run dev      # electron-vite dev, hot reload
-npm run build    # typecheck both projects + bundle
-npm run smoke    # build, launch, screenshot the window, exit
+npm run dev                                  # electron-vite dev, hot reload
+npm run build                                # typecheck both projects + bundle
+npm run smoke                                # launch against examples/demo-vault, screenshot
+node scripts/smoke.mjs none out/welcome.png  # the first-run screen, no vault
 ```
 
 Electron + React + Tailwind v4 + [shadcn/ui](https://ui.shadcn.com) components,
@@ -20,8 +26,13 @@ exist, what a build produces, whether the citation rule holds — is answered by
 shelling out to `report-maker`, exactly as a terminal would:
 
 ```
-renderer  ──IPC──▶  main  ──spawn──▶  python3 bin/report-maker -C <vault> …
+renderer  ──IPC──▶  main  ──spawn──▶  report-maker -C <vault> …
 ```
+
+`engine.locate()` finds the CLI in the order a user would expect to win:
+`REPORT_MAKER_BIN`, then `REPORT_MAKER_ROOT`, then a copy bundled in a packaged
+build (`resources/engine-src`), then the repo this app was built from, then
+`report-maker` on `PATH`. The first-run screen prints which one it found.
 
 That is deliberate. A desktop app that reimplemented any of it would be the
 thing that drifts, and the engine would stop being the single answer to "what

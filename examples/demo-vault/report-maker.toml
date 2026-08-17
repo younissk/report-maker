@@ -6,7 +6,7 @@
 #
 # Generated theme files land in .build/ and are never edited by hand.
 
-[workspace]
+[vault]
 reports = "reports"
 brand   = "brand"
 out     = "out"

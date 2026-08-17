@@ -1,9 +1,16 @@
 # report-maker — repository instructions
 
-A headless report engine over a folder-based vault. Reports are Typst, built by
-`engine/`, which is pure Python and has no third-party dependencies. See
-[README.md](README.md) for the commands and [engine/README.md](engine/README.md)
-for the internals.
+A headless report engine over a folder-based vault, plus an Electron app. Reports
+are Typst, built by `engine/`, which is pure Python and has no third-party
+dependencies. See [README.md](README.md) for the commands and
+[engine/README.md](engine/README.md) for the internals.
+
+**This repository is the tool, not a vault.** A vault is any folder holding
+`report-maker.toml`, anywhere on the user's disk; the repo holds the engine, the
+app, and `examples/demo-vault/` — a sample vault for development and for the
+app's smoke test. Never scaffold a vault at the repository root, and never add
+report content outside `examples/demo-vault/`. Commands take the vault with `-C`:
+`report-maker -C examples/demo-vault all`, or `make <target> V=<vault>`.
 
 Folders are the data model, and there is no index to keep in sync:
 
@@ -54,15 +61,23 @@ before calling a report finished; `report-maker all` runs it last.
 
 ## Building
 
+`V` names the vault and defaults to `examples/demo-vault`; `R` narrows to one
+report or one folder of them.
+
 ```bash
-make                       # stage, diagrams, PDFs, page images, manifest, check
-make R=<target>            # narrow to one report, or to a folder of them
-make new T="Title" G=clients/acme TPL=brief    # scaffold a report
-make templates             # the designs available
-make design ID=audits/company FROM=base        # an editable design
-make check                 # the citation rule alone
-make test                  # engine unit tests
+make V=<vault>                                 # stage, diagrams, PDFs, pages, manifest, check
+make build V=<vault> R=clients/acme            # one folder of reports
+make new T="Title" V=<vault> G=clients/acme TPL=brief
+make templates V=<vault>                       # the designs available there
+make design ID=audits/company FROM=base V=<vault>
+make check V=<vault>                           # the citation rule alone
+make test                                      # engine unit tests
+make app                                       # the desktop app
 ```
+
+`RM` is a GNU make built-in (`rm -f`) and must never be used as the variable
+holding the CLI — `$(RM) doctor` silently expands to `rm -f doctor`. The Makefile
+uses `CLI` and `VAULT`.
 
 The desktop shell in `app/` (`make app`) is a front end over these same commands
 — it shells out to the CLI for everything and stores nothing but the list of

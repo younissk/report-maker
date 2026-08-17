@@ -12,7 +12,7 @@ is what makes the same code usable from a shell, a Makefile, CI, or an agent.
 
 Modules:
 
-    config      workspace discovery, report-maker.toml
+    config      vault discovery, report-maker.toml
     brand       brand.json → Typst tokens + mermaid theme (generated)
     workspace   which reports exist, and their metadata
     diagrams    mermaid .mmd → branded .svg
@@ -20,7 +20,7 @@ Modules:
     pages       PDF → page PNGs + pages.json
     manifest    out/manifest.json
     check       the citation rule, enforced
-    scaffold    new workspaces and new reports
+    scaffold    new vaults, new reports, new designs
     cli         the command line over all of the above
 """
 

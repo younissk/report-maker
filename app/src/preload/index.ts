@@ -14,6 +14,7 @@ const api: Api = {
   vaults: {
     list: (): Promise<VaultList> => ipcRenderer.invoke('vault:list'),
     open: (): Promise<OpenResult> => ipcRenderer.invoke('vault:open'),
+    create: (): Promise<OpenResult> => ipcRenderer.invoke('vault:create'),
     select: (path: string): Promise<VaultList> => ipcRenderer.invoke('vault:select', path),
     forget: (path: string): Promise<VaultList> => ipcRenderer.invoke('vault:forget', path)
   },
@@ -35,7 +36,8 @@ const api: Api = {
       ipcRenderer.invoke('engine:run', vault, args),
     json: <T>(vault: string, args: string[]): Promise<T> =>
       ipcRenderer.invoke('engine:json', vault, args),
-    manifest: <T>(vault: string): Promise<T | null> => ipcRenderer.invoke('engine:manifest', vault)
+    manifest: <T>(vault: string): Promise<T | null> => ipcRenderer.invoke('engine:manifest', vault),
+    where: (): Promise<string> => ipcRenderer.invoke('engine:where')
   },
   platform: process.platform
 }

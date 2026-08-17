@@ -4,6 +4,7 @@
  * path that has been checked to sit inside the active vault.
  */
 
+import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 import * as engine from './engine'
@@ -54,7 +55,8 @@ function handlers(): void {
 
   ipcMain.handle('vault:open', async () => {
     const picked = await dialog.showOpenDialog({
-      title: 'Open a report-maker vault',
+      title: 'Open a vault',
+      message: 'Choose the folder that holds report-maker.toml',
       properties: ['openDirectory', 'createDirectory']
     })
     if (picked.canceled || !picked.filePaths[0]) return { ok: false as const, reason: 'cancelled' }
@@ -75,6 +77,27 @@ function handlers(): void {
     }
     return { ok: true as const, list: await vaults.add(path) }
   })
+
+  // Creating a vault is picking where it should live and letting the engine
+  // scaffold it — the app never writes a vault's structure itself.
+  ipcMain.handle('vault:create', async () => {
+    const picked = await dialog.showSaveDialog({
+      title: 'Create a vault',
+      message: 'Choose a name and a place for the new vault folder',
+      buttonLabel: 'Create',
+      nameFieldLabel: 'Vault name',
+      defaultPath: join(app.getPath('documents'), 'Reports'),
+      properties: ['createDirectory']
+    })
+    if (picked.canceled || !picked.filePath) return { ok: false as const, reason: 'cancelled' }
+
+    await mkdir(picked.filePath, { recursive: true })
+    const result = await engine.run(picked.filePath, ['init'])
+    if (result.code !== 0) return { ok: false as const, reason: result.stderr || result.stdout }
+    return { ok: true as const, list: await vaults.add(picked.filePath) }
+  })
+
+  ipcMain.handle('engine:where', () => engine.describe())
 
   ipcMain.handle('tree:read', (_e, vault: string) => tree.tree(vault))
   ipcMain.handle('file:read', (_e, vault: string, path: string) => tree.read(vault, path))

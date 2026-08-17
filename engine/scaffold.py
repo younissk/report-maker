@@ -16,7 +16,7 @@ from pathlib import Path
 from . import vault
 from .config import CONFIG_NAME, ENGINE_DIR, Config
 
-WORKSPACE_TOML = """# report-maker vault.
+VAULT_TOML = """# report-maker vault.
 #
 #   report-maker new "Title"            scaffold a report
 #   report-maker new "Title" --into acme --template brief
@@ -27,7 +27,7 @@ WORKSPACE_TOML = """# report-maker vault.
 # Folders are the filing system: reports/ nests as deep as you like, and
 # templates/ nests to group designs. Generated files land in .build/ and out/.
 
-[workspace]
+[vault]
 reports   = "{reports}"
 templates = "{templates}"
 brand     = "{brand}"
@@ -107,7 +107,7 @@ def init(root: Path, force: bool = False) -> None:
     root.mkdir(parents=True, exist_ok=True)
     _write(
         root / CONFIG_NAME,
-        WORKSPACE_TOML.format(
+        VAULT_TOML.format(
             reports="reports", templates="templates", brand="brand", out="out"
         ),
         force,
