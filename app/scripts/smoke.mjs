@@ -35,7 +35,7 @@ mkdirSync(dirname(shot), { recursive: true })
 const profile = resolve(app, 'out/smoke-profile')
 rmSync(profile, { recursive: true, force: true })
 
-const child = spawn(electron, [app, '--user-data-dir', profile], {
+const child = spawn(electron, [app, ...(vault ? [vault] : []), '--user-data-dir', profile], {
   stdio: 'inherit',
   env: {
     ...process.env,
@@ -43,7 +43,6 @@ const child = spawn(electron, [app, '--user-data-dir', profile], {
     RM_SCREENSHOT: shot,
     // Chromium's PDF plugin paints late; capture after it has.
     RM_SCREENSHOT_DELAY: process.env.RM_SCREENSHOT_DELAY ?? '6000',
-    ...(vault ? { RM_SMOKE_VAULT: vault } : {})
   }
 })
 

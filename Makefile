@@ -17,7 +17,8 @@
 #   make watch R=<target>          live rebuild while writing
 #   make doctor                    what is installed, what is missing
 #   make test                      engine unit tests
-#   make app                       the desktop app (opens with no vault)
+#   make app                       the desktop app, dev mode
+#   make open V=<vault>            build the app and open it on that vault
 #   make app-smoke                 build the app, screenshot it, exit
 #   make clean V=<vault>           remove that vault's out/ and generated .build/
 #
@@ -32,7 +33,7 @@ PY  ?= python3
 # written as `$(VAULT) doctor` silently expands to `rm -f doctor`.
 VAULT = $(CLI) -C $(V)
 
-.PHONY: all new list templates design stage diagrams build pages manifest check watch doctor test app app-build app-smoke app-deps clean help
+.PHONY: all new list templates design stage diagrams build pages manifest check watch doctor test app open app-build app-smoke app-deps clean help
 
 all:
 	@$(VAULT) all $(R)
@@ -83,6 +84,11 @@ test:
 # here depends on it. `npm install` runs on first use only.
 app: app-deps
 	@cd app && npm run dev
+
+# Launch the built app on a vault. The app takes the vault as an argument, so
+# this is the same thing as double-clicking it and picking the folder.
+open: app-build
+	@cd app && npm run open -- "$(abspath $(V))"
 
 app-build: app-deps
 	@cd app && npm run build

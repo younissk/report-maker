@@ -7,10 +7,15 @@ It ships with no vault, the way an editor ships with no document. First run show
 `report-maker.toml`, anywhere on the disk, and the app remembers the ones you have
 opened (a JSON file in userData — nothing else).
 
+A vault can also be named at launch — `npm run open -- ~/Documents/Reports`, or
+`make open V=~/Documents/Reports` from the repo root, or `RM_OPEN_VAULT` in the
+environment. That is the path the smoke test drives, so it stays working.
+
 ```bash
 cd app
 npm install
 npm run dev                                  # electron-vite dev, hot reload
+npm run build && npm run open -- <vault>     # launch it on a vault
 npm run build                                # typecheck both projects + bundle
 npm run smoke                                # launch against examples/demo-vault, screenshot
 node scripts/smoke.mjs none out/welcome.png  # the first-run screen, no vault

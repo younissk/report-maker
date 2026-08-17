@@ -5,7 +5,7 @@
  */
 
 import { mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 import * as engine from './engine'
 import * as tree from './tree'
@@ -115,11 +115,30 @@ function handlers(): void {
   ipcMain.handle('engine:manifest', (_e, vault: string) => engine.manifest(vault))
 }
 
+/**
+ * A vault named on the command line — `report-maker-app ~/Documents/Reports` —
+ * or in RM_OPEN_VAULT. Opening a folder is the whole interaction model, so being
+ * able to name one at launch is what makes the app scriptable and what the smoke
+ * test uses.
+ */
+function requestedVault(): string | null {
+  const fromEnv = process.env.RM_OPEN_VAULT
+  if (fromEnv && engine.isVault(fromEnv)) return resolve(fromEnv)
+
+  // argv holds the electron binary, possibly the app path in dev, then the rest.
+  for (const arg of process.argv.slice(1)) {
+    if (arg.startsWith('-')) continue
+    const path = resolve(arg)
+    if (engine.isVault(path)) return path
+  }
+  return null
+}
+
 app.whenReady().then(async () => {
   handlers()
 
-  // `npm run smoke` points the app at one vault on a throwaway profile.
-  if (process.env.RM_SMOKE_VAULT) await vaults.add(process.env.RM_SMOKE_VAULT)
+  const requested = requestedVault()
+  if (requested) await vaults.add(requested)
 
   const win = createWindow()
 

@@ -235,8 +235,9 @@ staleness, plus the template registry and the list of groups.
 a CodeMirror editor, and Chromium's PDF viewer side by side.
 
 ```bash
-make app          # dev, with hot reload (installs its deps on first run)
-make app-smoke    # build it, screenshot the window, exit — its own smoke test
+make app                          # dev, with hot reload (installs deps on first run)
+make open V=~/Documents/Reports   # build it and open it on that vault
+make app-smoke                    # build it, screenshot the window, exit
 ```
 
 It opens with **no vault**, like an editor with no document: open a folder, or
