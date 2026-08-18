@@ -6,6 +6,10 @@
 
 #import "{{design}}/report.typ": report
 #import "{{design}}/components.typ": *
+// A number is a fact about the world, so it is cited like any other: register
+// the file with `report-maker data add`, then read it with srctable(…). It
+// lives in its own staged file, which is why this import is separate.
+#import "{{design}}/data.typ": *
 
 #show: report.with(
   title: "{{title}}",

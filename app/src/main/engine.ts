@@ -17,6 +17,8 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { delimiter, join, resolve } from 'node:path'
 import { app } from 'electron'
+import type { Diagnostics } from '../shared/types'
+import * as env from './env'
 
 export type Run = { code: number; stdout: string; stderr: string; command: string }
 
@@ -66,28 +68,41 @@ function argv(located: Located, args: string[]): { cmd: string; argv: string[] }
     : { cmd: located.path, argv: args }
 }
 
-export function describe(): string {
+/**
+ * Which CLI the app will spawn. Async because it must not answer before the
+ * PATH has been recovered: from a packaged app the honest answer a moment too
+ * early is "not found", and that is the one the status bar would keep.
+ */
+export async function describe(): Promise<string> {
+  await env.hydrate()
   const located = locate()
   if (!located) return 'not found'
   return located.kind === 'script' ? located.script : located.path
 }
 
-export function run(vault: string, args: string[]): Promise<Run> {
+const MISSING =
+  'report-maker was not found. Set REPORT_MAKER_ROOT to the engine checkout, ' +
+  'or put report-maker on PATH.'
+
+/**
+ * One engine invocation. Every caller goes through here, which is what makes
+ * `env.hydrate()` a single line rather than a rule everybody has to remember:
+ * the PATH is recovered before the first spawn and cached for every one after.
+ *
+ * `cwd` matters as much as the arguments. Commands that take no `-C` still
+ * resolve the nearest vault above the working directory, so running them from
+ * the user's home is how you ask about the installation rather than the vault.
+ */
+async function exec(args: string[], cwd: string): Promise<Run> {
+  await env.hydrate()
   const located = locate()
   if (!located) {
-    return Promise.resolve({
-      code: 127,
-      stdout: '',
-      stderr:
-        'report-maker was not found. Set REPORT_MAKER_ROOT to the engine checkout, ' +
-        'or put report-maker on PATH.',
-      command: 'report-maker'
-    })
+    return { code: 127, stdout: '', stderr: MISSING, command: 'report-maker' }
   }
 
-  const { cmd, argv: full } = argv(located, ['-C', vault, ...args])
+  const { cmd, argv: full } = argv(located, args)
   return new Promise((done) => {
-    const child = spawn(cmd, full, { cwd: vault, env: process.env })
+    const child = spawn(cmd, full, { cwd, env: process.env })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk) => (stdout += chunk.toString()))
@@ -104,6 +119,53 @@ export function run(vault: string, args: string[]): Promise<Run> {
       done({ code: code ?? 0, stdout, stderr, command: `${cmd} ${full.join(' ')}` })
     )
   })
+}
+
+export function run(vault: string, args: string[]): Promise<Run> {
+  return exec(['-C', vault, ...args], vault)
+}
+
+/**
+ * The engine's version, or null when it predates `--version`.
+ *
+ * Both cases are ordinary. An engine without the flag answers with argparse's
+ * usage on stderr and exit 2, which is not a version — so nothing is reported
+ * rather than something wrong, and the caller says "version unavailable"
+ * instead of printing a usage line where a number belongs.
+ *
+ * The prog name is stripped: `--version` prints `report-maker 0.1.0`, and a
+ * caller that already knows what it asked wants the half it did not know.
+ */
+export async function version(): Promise<string | null> {
+  const result = await exec(['--version'], app.getPath('home'))
+  if (result.code !== 0) return null
+  const line = (result.stdout || result.stderr).trim().split('\n')[0]?.trim()
+  if (!line) return null
+  return line.replace(/^report-maker\s+/, '') || null
+}
+
+/**
+ * What the app can say about its own installation.
+ *
+ * `doctor` is the engine's answer to "what is installed", reproduced verbatim
+ * rather than parsed — the app has no second opinion about typst. What the app
+ * *does* add is the PATH that search happened on, because the failure this
+ * whole file guards against is a doctor that reads green in a terminal and
+ * finds nothing from Finder, and only the two side by side show why.
+ *
+ * With no vault, run from the user's home so `doctor` reports the installation
+ * rather than whichever vault happens to sit above the app bundle.
+ */
+export async function doctor(vault: string | null): Promise<Diagnostics> {
+  const args = vault ? ['-C', vault, 'doctor'] : ['doctor']
+  const result = await exec(args, vault ?? app.getPath('home'))
+  return {
+    engine: await describe(),
+    version: await version(),
+    doctor: [result.stdout, result.stderr].filter(Boolean).join('\n').trimEnd(),
+    code: result.code,
+    path: env.probed()
+  }
 }
 
 /** A run whose stdout is JSON — `list --json`, `templates --json`. */

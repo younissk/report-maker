@@ -1,0 +1,98 @@
+# Packaging the desktop shell.
+#
+# The app is a front end over a Python engine, so a distributable has to carry
+# both. `extraResources` copies the engine checkout into the bundle at
+# `Contents/Resources/engine-src`, which is exactly where `src/main/engine.ts`
+# already looks in a packaged build:
+#
+#   join(process.resourcesPath, 'engine-src') + '/bin/report-maker'
+#
+# That lookup is the contract — change the layout here and a packaged app finds
+# no engine at all. It stays a plain checkout rather than a frozen binary
+# because the engine is standard-library Python: copying the files *is* the
+# build step, and a user with `REPORT_MAKER_ROOT` set still wins over it.
+
+# Two ways out of here, and they want different targets. `npm run dist` builds
+# the dmg + zip below, which is what you hand to somebody else. `make install`
+# runs `electron-builder --mac dir` instead and copies the resulting bundle
+# straight into /Applications: a disk image exists to be downloaded, and there is
+# nothing to download when the machine that builds it is the machine that runs
+# it. Both read everything else on this page, so the installed app and the
+# distributed one are assembled identically.
+#
+# `appId` is load-bearing beyond Launch Services: scripts/install-app.sh reads
+# CFBundleIdentifier out of whatever is already sitting at
+# /Applications/report-maker.app and refuses to remove it unless it matches this
+# exact string. Change it here and the installer stops recognising the bundles it
+# installed yesterday.
+
+appId: com.younisskandah.reportmaker
+productName: report-maker
+copyright: © Youniss Kandah
+
+directories:
+  output: dist
+  buildResources: build
+
+# `out/` is electron-vite's bundle directory, but it is also where the smoke
+# test drops its screenshots and its throwaway user-data profile. Ship the
+# bundle, not the evidence.
+files:
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
+  - package.json
+  - '!out/*.png'
+  - '!out/smoke-profile'
+
+extraResources:
+  - from: ../engine
+    to: engine-src/engine
+    filter:
+      - '**/*'
+      - '!**/__pycache__'
+      - '!**/*.py[cod]'
+      - '!**/tests'
+      - '!**/*.tsbuildinfo'
+  - from: ../bin
+    to: engine-src/bin
+    filter:
+      - '**/*'
+      - '!**/__pycache__'
+      - '!**/*.py[cod]'
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  # Deliberately unsigned. A signed, notarised build needs, in the environment:
+  #
+  #   CSC_LINK                      the .p12 Developer ID certificate (path or base64)
+  #   CSC_KEY_PASSWORD              its password
+  #   APPLE_ID                      the Apple ID that owns the Developer ID
+  #   APPLE_APP_SPECIFIC_PASSWORD   an app-specific password for that Apple ID
+  #   APPLE_TEAM_ID                 the team the certificate belongs to
+  #
+  # …and `identity` set to the certificate name (or removed, so electron-builder
+  # discovers it), plus `notarize: true`. Until someone actually holds those
+  # credentials, guessing at them produces a build that fails late and loudly;
+  # `null` produces one that works on the machine that made it.
+  identity: null
+  notarize: false
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# The engine is Python source, not a native module, so there is nothing to
+# rebuild per architecture — the same resources ride along in both slices.
+npmRebuild: false

@@ -1,0 +1,4 @@
+# Packaged artefacts. `npm run dist` writes a ~270 MB bundle here — an unsigned
+# .app, a dmg and a zip — all of which are rebuilt from source in two minutes.
+# The root .gitignore already covers out/ (the electron-vite bundle).
+dist/

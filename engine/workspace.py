@@ -14,6 +14,11 @@ manager, with no index to keep in sync.
 Metadata is read out of the `#show: report.with(…)` call by regex rather than by
 compiling, because the manifest has to work for a report that does not currently
 compile.
+
+One of those fields carries weight the others do not. `status:` is how a report
+says whether it is finished, and `check.py` reads it as a gate: a `draft` is
+allowed to be wrong, a `final` is not. It is three words and no more — this is
+not a workflow engine, and a fourth value would be the first step towards one.
 """
 
 from __future__ import annotations
@@ -34,7 +39,14 @@ FIELDS = (
     "doc-id",
     "version",
     "classification",
+    "status",
 )
+
+#: The whole vocabulary of `status:`. Three words, in the order a report moves
+#: through them, and deliberately no more: `draft` says "I know this is not
+#: finished", `review` is the ordinary state, `final` is a claim about the
+#: document that `check` is entitled to refuse.
+STATUSES = ("draft", "review", "final")
 
 MONTHS = (
     "January February March April May June July "
@@ -42,6 +54,36 @@ MONTHS = (
 ).split()
 
 DEFAULT_TEMPLATE = "base"
+
+STATUS_PATTERN = re.compile(r'^\s*status:\s*"((?:[^"\\]|\\.)*)"', re.M)
+
+
+def status_in(src: str) -> str:
+    """The declared status of an already-loaded `main.typ`, lowercased.
+
+    Takes text rather than a `Report` because the one caller that matters —
+    `check.py` — has the file in hand already, and reading a report's source
+    twice to answer one question is how a linter becomes slow on a big vault.
+
+    An absent field and a value outside `STATUSES` both come back as `""`, which
+    every caller reads as "unstated". That is the safe direction: a typo in
+    `status:` must never quietly grant a report the leniency of `draft`.
+    """
+    match = STATUS_PATTERN.search(src)
+    if not match:
+        return ""
+    value = match.group(1).strip().lower()
+    return value if value in STATUSES else ""
+
+
+def status_declared(src: str) -> str:
+    """What the file actually says, whether or not it is a known status.
+
+    Kept apart from `status_in` so a rule can tell "no status" from "a status
+    nobody recognises" and warn about the second without acting on it.
+    """
+    match = STATUS_PATTERN.search(src)
+    return match.group(1).strip() if match else ""
 
 
 @dataclass
@@ -88,6 +130,17 @@ class Report:
             self.main.read_text(encoding="utf-8"),
         )
         return match.group(1) if match else DEFAULT_TEMPLATE
+
+    @property
+    def status(self) -> str:
+        """`draft`, `review`, `final`, or `""` when the report does not say.
+
+        A convenience for callers that do not already hold the source; anything
+        inside `check.py` should use `status_in` on the text it has read.
+        """
+        if not self.main.is_file():
+            return ""
+        return status_in(self.main.read_text(encoding="utf-8"))
 
     def meta(self) -> dict[str, str]:
         src = self.main.read_text(encoding="utf-8")

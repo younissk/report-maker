@@ -14,6 +14,11 @@
 // borrowed rather than duplicated.
 #import "/.build/design/base/report.typ": running-header, running-footer
 
+// The colophon is inherited from base rather than copied: a brief that printed a
+// different account of its own build than a report would is two answers to one
+// question.
+#import "components.typ"
+
 #let letterhead(
   title: none,
   subtitle: none,
@@ -24,6 +29,7 @@
   subject: none,
   doc-id: none,
   classification: none,
+  status: none,
   abstract: none,
 ) = {
   block(width: 100%, below: space.lg)[
@@ -31,8 +37,12 @@
       columns: (1fr, auto),
       align: (left + horizon, right + horizon),
       orgmark(size: 15pt),
+      // A brief has no cover to carry a metadata table, so the status — when the
+      // report declares one — rides the eyebrow beside kind and classification.
       label(
-        (kind, classification).filter(x => x != none).join("  ·  "),
+        (kind, classification, if status != none { upper(status) })
+          .filter(x => x != none)
+          .join("  ·  "),
         fill: colors.accent,
         size: 7.4pt,
       ),
@@ -94,6 +104,9 @@
   doc-id: none,
   version: defaults.version,
   classification: defaults.classification,
+  // See base/report.typ: `report-maker check` gates on this field, so every
+  // design has to accept it whether or not it prints it.
+  status: none,
   abstract: none,
   org-name: org.name,
   org-url: org.url,
@@ -101,6 +114,10 @@
   sources: none,
   bib-style: defaults.bib-style,
   bib-title: defaults.bib-title,
+  // The facts of the build that made this file — see base/report.typ. A brief
+  // overrides report.typ wholesale, so it has to opt in explicitly; the
+  // component itself is the inherited one.
+  colophon: none,
   body,
 ) = {
   set document(
@@ -223,6 +240,7 @@
     subject: subject,
     doc-id: doc-id,
     classification: classification,
+    status: status,
     abstract: abstract,
   )
 
@@ -231,5 +249,11 @@
   if sources != none {
     heading(level: 1, bib-title)
     bibliography(sources, title: none, style: bib-style, full: true)
+  }
+
+  // Last, and after the references: the evidence comes before the account of the
+  // machine that assembled it.
+  if colophon != none {
+    components.colophon(colophon)
   }
 }

@@ -13,7 +13,7 @@ import re
 import shutil
 from pathlib import Path
 
-from . import vault
+from . import notes, vault
 from .config import CONFIG_NAME, ENGINE_DIR, Config
 
 VAULT_TOML = """# report-maker vault.
@@ -185,6 +185,12 @@ def new_report(
         source = starter / name
         if source.is_file():
             _write(folder / name, _expand(source.read_text(encoding="utf-8"), values))
+
+    # The pad, seeded rather than left to be discovered. A scratch file nobody
+    # knows about is a scratch file nobody writes in, and the first line of it is
+    # the one piece of advice that makes the citation rule cheap to keep: start
+    # sources.yml before the prose. It is never compiled and never checked.
+    _write(folder / notes.TODOS_NAME, notes.starter_text(report_id))
 
     if with_diagram:
         examples = sorted((starter / "diagrams").glob("*.mmd"))

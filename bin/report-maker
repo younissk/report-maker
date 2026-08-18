@@ -7,12 +7,90 @@ Symlink this onto your PATH:
 
 It adds the engine's parent directory to sys.path, so no install step and no
 virtualenv are needed — the engine has no third-party dependencies.
+
+The one thing it does before that is check which interpreter it is running
+under, and move to a newer one if this is too old. `#!/usr/bin/env python3`
+resolves to the first `python3` on PATH, and on macOS that is `/usr/bin/python3`
+— Python 3.9, which has no `tomllib`. The engine needs 3.11.
+
+That is not a theoretical concern, it is how the packaged app failed: an app
+launched from Finder gets `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else, so
+even with Homebrew appended as a fallback the system Python still wins the
+lookup, and every engine call died on `ModuleNotFoundError: No module named
+'tomllib'` — a traceback about a module nobody asked for, four imports deep,
+naming neither Python nor its version. The check lives here rather than in the
+app because the app shells out to this script for everything and holds no logic
+of its own; fixing it here fixes the terminal user with the same stale `python3`
+at the same time.
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 import sys
 from pathlib import Path
+
+REQUIRES = (3, 11)
+# Set across the re-exec so a mis-detected interpreter cannot loop for ever. A
+# second pass that is still too old falls through to the error message below,
+# which is a bad outcome reported clearly rather than a hang.
+SENTINEL = "REPORT_MAKER_REEXEC"
+
+# Versioned names only, newest first. A bare `python3` would have to be run to
+# learn its version; `python3.12` states it in the name, so the search stays a
+# handful of stat calls and never executes anything to find out what it is.
+NEWER = [f"python3.{minor}" for minor in range(20, REQUIRES[1] - 1, -1)]
+
+# Where a newer Python lives when it is not on PATH at all — the packaged-app
+# case, where PATH is the four system directories. Same list as the app's own
+# fallback, for the same reason.
+LOOKASIDE = ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin")
+
+
+def _newer_python() -> str | None:
+    """The path to a `python3.N` new enough to run the engine, or None."""
+    for name in NEWER:
+        found = shutil.which(name)
+        if found:
+            return found
+        for directory in LOOKASIDE:
+            candidate = Path(directory) / name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+    return None
+
+
+def _ensure_interpreter() -> None:
+    if sys.version_info >= REQUIRES:
+        return
+
+    running = ".".join(str(part) for part in sys.version_info[:3])
+    wanted = ".".join(str(part) for part in REQUIRES)
+
+    if os.environ.get(SENTINEL):
+        sys.exit(
+            f"report-maker: still running under Python {running} after trying to "
+            f"switch interpreter; it needs {wanted} or newer.\n"
+            f"Run it explicitly:  python3.13 {Path(__file__).resolve()} …"
+        )
+
+    replacement = _newer_python()
+    if replacement is None:
+        sys.exit(
+            f"report-maker needs Python {wanted} or newer, and this is Python "
+            f"{running} ({sys.executable}).\n"
+            "No newer python3 was found on PATH or in the usual places.\n"
+            "Install one — `brew install python@3.13` — or run report-maker with "
+            "an interpreter you already have:\n"
+            f"    python3.13 {Path(__file__).resolve()} …"
+        )
+
+    os.environ[SENTINEL] = running
+    os.execv(replacement, [replacement, str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
+_ensure_interpreter()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
