@@ -15,7 +15,9 @@ report content outside `examples/demo-vault/`. Commands take the vault with `-C`
 Folders are the data model, and there is no index to keep in sync:
 
 - `reports/<any/nesting>/<YYYY-MM-DD-slug>/` — the path is the report id, the
-  folders above it are its group, and `out/` mirrors the same shape.
+  folders above it are its group, and `out/` mirrors the same shape. Its
+  `diagrams/`, `snapshots/` and `data/` folders are part of the report and travel
+  with it, as do its optional `todos.md` and `notes.md` — see [The pad](#the-pad).
 - `templates/<group…>/<name>/` — a design. Nesting groups it. A vault design
   shadows a built-in of the same id.
 - `brand/brand.json` plus `brand/<name>/brand.json` — brand packs. A design
@@ -32,7 +34,9 @@ figures, images, captions, callouts, executive summaries and scorecards alike.
 | A fact about the world | carries a `@key` citation resolving to the report's `sources.yml` |
 | A measurement we took | cited like any other source, with the exact command in an appendix so it can be re-run |
 | A judgement, rating, forecast, or recommendation | ends with `#assess`, or sits inside `assessment[…]` |
+| A verbatim quotation | `srcquote("exact words", source: [@key], locator: …)`. The quote is a Typst *string*, and `check` compares it word for word against `snapshots/<key>.txt` |
 | A table or figure | built with `srcfig(…, source: [@key])`; if the content is our judgement, the source reads `none — assessment, not evidence` |
+| A number that came from a file | the file goes in `reports/<id>/data/`, registered with `report-maker data add`, and the table reads it with `srctable(path, source: [@data-<name>])` — never retyped into the prose |
 | An image | built with `srcimage(path, caption:, source:, alt:)`. Never place a bare `image()` in a report |
 | A diagram | authored as mermaid in `diagrams/*.mmd`, rendered by `report-maker diagrams`, placed with `diagram(…)`. Cited like any other figure |
 
@@ -43,21 +47,81 @@ In practice, when writing or editing a report:
 
 - Start `sources.yml` before the prose. If a claim has no key to point at,
   either go and find the source or downgrade the sentence to an assessment.
-- Quote the audited party verbatim with `claim(…, attribution:, source: [@key])`
-  when the exact wording carries weight. Paraphrase plus citation otherwise.
+  `report-maker cite <report> <url>` does the whole clerical half of that in one
+  line — it fetches the page, writes the entry, and prints the key to cite with.
+- Quote the audited party verbatim with `srcquote("…", source: [@key],
+  locator: …)` when the exact wording carries weight; the words have to be in the
+  archived page or `check` fails with E009. `claim(…, attribution:, source:)` is
+  for a paraphrase you want set apart. Paraphrase plus citation otherwise.
 - Never merge a cited fact and a judgement into one unmarked sentence. Split
   them, or mark the whole sentence `#assess`.
 - Severity ratings, scores, likelihood and impact are always assessment. The
   facts they rest on are always cited.
 - Absence of evidence is reported as absence ("no pricing on any reviewed page
-  @key"), never as a claim about the underlying fact.
+  @key"), never as a claim about the underlying fact. The `@key` for that is a
+  real entry, filed by `report-maker data absence <report> <corpus> <query>`,
+  which records what was searched, the exact query and the date so somebody can
+  run it again. An absence sentence with no key behind it is an opinion wearing
+  the clothes of a finding, and W007 will send you here when a column arrives
+  empty.
 - Every report passes `sources:` to the template as a project-absolute path:
   `sources: "/reports/<slug>/sources.yml"`. A numbered References section is
   appended automatically, listing every reviewed source whether or not a `@key`
   reached it.
 
-`report-maker check` enforces this and exits non-zero on any error. Run it
-before calling a report finished; `report-maker all` runs it last.
+`report-maker check` enforces all of this and exits non-zero on any error. Run it
+before calling a report finished; `report-maker all` runs it last. A report may
+declare `status: "draft"`, which reports its errors as warnings while it is
+unfinished — and `status: "final"`, which is refused (E014) while any error
+stands. Never seed a status into a starter, and never move a report to `final` to
+make a build green.
+
+**Do not weaken a rule to pass a build.** A finding is a fact about the report,
+so the fix is the report. Lowering an error to a warning, deleting a rule's test,
+or reaching for `--warn-only` outside a genuine work-in-progress all convert a
+true statement about the vault into a false one.
+
+**Evidence lives inside the report folder.** `reports/<id>/snapshots/<key>.html`
+is the archived copy of a cited page, `.txt` is its extracted text, and `.json`
+carries the sha256 and the moment it was fetched; `reports/<id>/data/` holds the
+CSVs its tables read. They sit there rather than in a vault-wide cache so that
+moving, zipping or handing over the folder takes the evidence with it. Never
+write into `snapshots/` by hand, and never overwrite one: `cite` creates them and
+`verify --refresh` rotates the old copy to `<key>.<date>.html` before writing a
+new record. An archive you are willing to overwrite is not an archive.
+
+The same holds for the numbers. Never edit a registered CSV and then hand-edit
+its `sha256:` in `sources.yml` — that is the one move the checksum exists to
+prevent. `report-maker data revise <report> <csv>` is the sanctioned path: it
+keeps a dated copy, moves the checksum, and prints what changed so the prose
+around the table can be re-read.
+
+## The pad
+
+A report folder also holds two markdown files, and neither is a report:
+
+- `todos.md` — a checklist, seeded by `report-maker new`.
+  `report-maker todos [target]` reads them across the vault; `--add`,
+  `--check <line>` and `--uncheck <line>` write.
+- `notes.md` — free prose, created only when somebody writes one.
+  `report-maker notes <target>` prints it.
+
+**Neither is ever compiled into the PDF, and the citation rule does not apply to
+either of them.** That is a decision, not an omission: the rule exists so nothing
+a *reader* sees can sit between a cited fact and a marked opinion, and a pad has
+no reader but the author. A half-formed thought that had to be cited before it
+could be written down would not get written down. `check` never opens these
+files, and `build` never sees them.
+
+**They are committed with the report**, and `.gitignore` must leave them alone. A
+note that does not travel with the folder is exactly the failure this design
+avoids: the folder is the unit that gets moved, zipped and handed over, and it
+has to arrive complete. If a thought is too private to commit, it does not belong
+in the vault at all.
+
+A `// TODO:` or `// FIXME:` in a comment in `main.typ` is harvested into the same
+view, read-only — a list that omitted it could not be trusted to be complete, and
+a checkbox in a Typst comment is prose, not state.
 
 ## Building
 
@@ -70,10 +134,39 @@ make build V=<vault> R=clients/acme            # one folder of reports
 make new T="Title" V=<vault> G=clients/acme TPL=brief
 make templates V=<vault>                       # the designs available there
 make design ID=audits/company FROM=base V=<vault>
-make check V=<vault>                           # the citation rule alone
+make check V=<vault>                           # the citation rule alone (SCORE=1 adds density)
+make build V=<vault> KEEP=1                    # build the rest of the vault past a broken report
 make test                                      # engine unit tests
 make app                                       # the desktop app
+make install                                   # CLI on PATH, app in /Applications (see INSTALL.md)
 ```
+
+The evidence commands, and the ones that read a vault back:
+
+```bash
+make cite R=<report> URL=https://…             # archive a page, add it to sources.yml
+make verify V=<vault>                          # re-fetch the archive, report drift
+make verify V=<vault> OFFLINE=1                # …without touching the network
+make score V=<vault>                           # cited / assessed / unmarked, per report
+make diff R=<report> REV=HEAD~3                # what changed, in claims not lines
+make html V=<vault>                            # self-contained bundle (run `make pages` first)
+make data V=<vault> R=<report>                 # the CSVs a report registered, and their checksums
+make find Q="pricing kind:source" V=<vault>    # search prose, sources, snapshots, diagrams
+make todos V=<vault>                           # the pad, across the vault (OPEN=1 for unfinished)
+make notes R=<report>                          # that report's notes.md
+make brand-preview V=<vault> PACK=mono         # render the brand specimen
+make sync V=<vault> M="message" PUSH=1         # commit, and optionally push
+make mcp V=<vault>                             # serve the vault to an agent
+```
+
+Anything without a `make` target is a direct CLI call: `report-maker sources
+<target>`, `report-maker data add|revise|revisions <target> <csv>`,
+`report-maker data status <target> <csv>`,
+`report-maker data absence <target> <corpus> <query>`, `report-maker index`,
+`report-maker brand list|show|new|set`,
+`report-maker template install|update|uninstall`, `report-maker diagrams
+--prepare <file>`, `report-maker --version`. Every command takes `--json` where
+the app needs it.
 
 `RM` is a GNU make built-in (`rm -f`) and must never be used as the variable
 holding the CLI — `$(RM) doctor` silently expands to `rm -f doctor`. The Makefile
@@ -84,16 +177,25 @@ The desktop shell in `app/` (`make app`) is a front end over these same commands
 vaults you have opened. Never move logic into it; add it to `engine/` and let the
 app call it.
 
-The engine itself has no preview server and no HTML viewer, by design — every
-command is headless. To read a built report, open `out/<report-id>.pdf`, or look at the
-page PNGs in `out/pages/<report-id>/`, which is also how an agent or an embedded
-browser that cannot render a PDF should read it.
+The engine has no preview server, by design — every command is headless and ends
+by writing a file. To read a built report, open `out/<report-id>.pdf`, or look at
+the page PNGs in `out/pages/<report-id>/`, which is also how an agent or an
+embedded browser that cannot render a PDF should read it. `report-maker html`
+writes `out/<report-id>.html` — the same pages plus the evidence behind every
+claim, in one self-contained file — but it writes it and stops: nothing serves
+it, and no command in the engine ever launches a browser.
+
+An agent driving a vault should reach for `report-maker mcp` rather than shelling
+out command by command. It exposes the vault over stdio JSON-RPC, and its
+`write_report` tool runs `check` on what it just wrote and restores the file byte
+for byte if the write introduced a new error — the rule is enforced at the moment
+of writing rather than at the next build.
 
 ## Conventions
 
 - One folder per report, named `YYYY-MM-DD-kebab-slug`, filed under whatever
-  folders make sense, containing `main.typ` and `sources.yml`. Folders starting
-  with `_` or `.` are not built.
+  folders make sense, containing `main.typ`, `sources.yml` and `todos.md`.
+  Folders starting with `_` or `.` are not built.
 - Reports import their design from `/.build/design/<template-id>/report.typ`, and
   reference their own files by project-absolute paths. A relative path in a
   report breaks the moment the folder moves. That import line is also the record

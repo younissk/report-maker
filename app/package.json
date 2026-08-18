@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Desktop shell over the report-maker engine: file tree, editor, PDF viewer, vault switcher.",
+  "author": "Youniss Kandah",
   "main": "./out/main/index.js",
   "type": "module",
   "scripts": {
@@ -10,7 +11,9 @@
     "build": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
     "start": "electron-vite preview",
     "smoke": "npm run build && node scripts/smoke.mjs",
-    "open": "electron ."
+    "open": "electron .",
+    "dist": "npm run build && electron-builder --mac",
+    "dist:dir": "npm run build && electron-builder --mac --dir"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
@@ -19,29 +22,44 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.3.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "vite": "^5.4.0"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.7.0",
+    "@codemirror/lang-yaml": "^6.1.3",
     "@codemirror/language": "^6.10.0",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/search": "^6.7.1",
     "@codemirror/state": "^6.5.0",
     "@codemirror/view": "^6.36.0",
     "@lezer/highlight": "^1.2.3",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-dropdown-menu": "^2.1.24",
+    "@radix-ui/react-label": "^2.1.15",
+    "@radix-ui/react-popover": "^1.1.23",
     "@radix-ui/react-scroll-area": "^1.2.2",
     "@radix-ui/react-select": "^2.1.4",
     "@radix-ui/react-separator": "^1.1.1",
+    "@radix-ui/react-slider": "^1.4.7",
     "@radix-ui/react-slot": "^1.1.1",
+    "@radix-ui/react-switch": "^1.3.7",
+    "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.1.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
     "codemirror": "^6.0.1",
     "lucide-react": "^0.469.0",
+    "mermaid": "^11.16.1",
     "radix-ui": "^1.6.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-resizable-panels": "^4.12.3",
     "tailwind-merge": "^2.6.0"
   }
 }

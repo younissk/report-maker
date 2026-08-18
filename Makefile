@@ -13,13 +13,32 @@
 #   make list V=<vault>            reports, grouped by folder
 #   make templates V=<vault>       designs, grouped by folder
 #   make design ID=<id> V=<vault>  create an editable design (FROM=<id>)
-#   make check V=<vault>           enforce the citation rule
+#   make design-install URL=<url>  fetch somebody else's design (ID=<id>  REF=<ref>)
+#   make check V=<vault>           enforce the citation rule  (SCORE=1 adds density)
+#   make cite R=<report> URL=<url> archive a source and add it to sources.yml
+#   make verify V=<vault>          re-fetch archived sources, report drift
+#   make score V=<vault>           evidence density per report
+#   make diff R=<report>           what changed since a revision (REV=<rev>)
+#   make html V=<vault>            report + evidence → one self-contained .html
+#   make data V=<vault>            the CSVs a report registered, with checksums
+#   make data-check V=<vault>      the data rules alone: stale, unread, degenerate
+#   make find Q=<query> V=<vault>  search prose, sources, snapshots and diagrams
+#   make index V=<vault>           build or refresh the search index
+#   make todos V=<vault>           the pad, across the vault  (OPEN=1  R=<report>)
+#   make notes R=<report>          that report's notes.md
+#   make brand-preview V=<vault>   render the brand specimen (PACK=<name>)
+#   make sync V=<vault>            commit the vault  (PUSH=1  M="message")
+#   make mcp V=<vault>             serve the vault to an agent over MCP
 #   make watch R=<target>          live rebuild while writing
 #   make doctor                    what is installed, what is missing
+#   make version                   which engine this is
 #   make test                      engine unit tests
 #   make app                       the desktop app, dev mode
 #   make open V=<vault>            build the app and open it on that vault
-#   make app-smoke                 build the app, screenshot it, exit
+#   make app-smoke                 build the app, drive it, screenshot each screen
+#   make app-dist                  package the app (macOS dmg + zip, unsigned)
+#   make install                   CLI on PATH, app in /Applications  (macOS)
+#   make uninstall                 take both of those away again
 #   make clean V=<vault>           remove that vault's out/ and generated .build/
 #
 # Every target is a thin call into engine/ — the Makefile adds no behaviour, so
@@ -33,7 +52,10 @@ PY  ?= python3
 # written as `$(VAULT) doctor` silently expands to `rm -f doctor`.
 VAULT = $(CLI) -C $(V)
 
-.PHONY: all new list templates design stage diagrams build pages manifest check watch doctor test app open app-build app-smoke app-deps clean help
+.PHONY: all new list templates design design-install stage diagrams build pages \
+        manifest check cite verify score diff html data data-check find index \
+        todos notes sync brand-preview mcp \
+        watch doctor version test app open app-build app-smoke app-deps clean help
 
 all:
 	@$(VAULT) all $(R)
@@ -52,14 +74,24 @@ design:
 	@test -n "$(ID)" || { echo 'usage: make design ID=audits/company [FROM=base] [V=<vault>]'; exit 1; }
 	@$(VAULT) template new $(ID) $(if $(FROM),--from $(FROM),)
 
+# An installed design is code that runs at build time, so the install records
+# where it came from: `template update` and `template uninstall` refuse to touch
+# a design without that record.
+design-install:
+	@test -n "$(URL)" || { echo 'usage: make design-install URL=https://github.com/you/house-style [ID=<id>] [REF=<ref>] [V=<vault>]'; exit 1; }
+	@$(VAULT) template install "$(URL)" $(if $(ID),--id $(ID),) $(if $(REF),--ref $(REF),)
+
 stage:
 	@$(VAULT) stage
 
 diagrams:
 	@$(VAULT) diagrams $(R) $(if $(FORCE),--force,)
 
+# KEEP=1 carries on past a report that will not compile and reports the failures
+# at the end. It still exits non-zero — one broken report must not make a vault
+# of two hundred unbuildable, and it must not go green either.
 build:
-	@$(VAULT) build $(R) $(if $(FORCE),--force,)
+	@$(VAULT) build $(R) $(if $(FORCE),--force,) $(if $(KEEP),--keep-going,)
 
 pages:
 	@$(VAULT) pages $(R) $(if $(PPI),--ppi $(PPI),) $(if $(FORCE),--force,)
@@ -68,7 +100,79 @@ manifest:
 	@$(VAULT) manifest
 
 check:
-	@$(VAULT) check $(R)
+	@$(VAULT) check $(R) $(if $(SCORE),--score,)
+
+# ── evidence ─────────────────────────────────────────────────────────────────
+#
+# A source is fetched, archived beside the report, and written into sources.yml
+# by one command; everything after that reads the archive rather than the web.
+
+cite:
+	@test -n "$(R)" -a -n "$(URL)" || { echo 'usage: make cite R=<report> URL=https://… [KEY=<key>] [V=<vault>]'; exit 1; }
+	@$(VAULT) cite $(R) "$(URL)" $(if $(KEY),--key $(KEY),)
+
+# OFFLINE=1 reports the archive without dialling out; REFRESH=1 re-archives a
+# changed page, keeping the previous copy.
+verify:
+	@$(VAULT) verify $(R) $(if $(OFFLINE),--offline,) $(if $(REFRESH),--refresh,)
+
+score:
+	@$(VAULT) score $(R)
+
+diff:
+	@test -n "$(R)" || { echo 'usage: make diff R=<report> [REV=HEAD~1] [V=<vault>]'; exit 1; }
+	@$(VAULT) diff $(R) $(if $(REV),--rev $(REV),)
+
+# The pages are inlined, so they have to exist: run `make pages` first.
+html:
+	@$(VAULT) html $(R)
+
+# ── numbers ──────────────────────────────────────────────────────────────────
+#
+# Registering a CSV and revising one are deliberately not here. `data add` takes
+# a path from outside the vault and `data revise` moves a recorded checksum —
+# both are decisions to take in front of the diff they cause, not conveniences to
+# wrap. `report-maker data add|revise <report> <csv>` says what it is doing.
+
+data:
+	@$(VAULT) data list $(R)
+
+data-check:
+	@$(VAULT) data check $(R)
+
+# ── reading the vault back ───────────────────────────────────────────────────
+
+find:
+	@test -n "$(Q)" || { echo 'usage: make find Q="pricing kind:source" [LIMIT=50] [V=<vault>]'; exit 1; }
+	@$(VAULT) find "$(Q)" $(if $(LIMIT),--limit $(LIMIT),)
+
+# Only the files that changed are re-read; FORCE=1 rebuilds the whole index.
+index:
+	@$(VAULT) index $(if $(FORCE),--force,)
+
+# The pad: todos.md, notes.md, and the // TODO: comments left in the source.
+# Never compiled, never cited — see "The pad" in CLAUDE.md.
+todos:
+	@$(VAULT) todos $(R) $(if $(OPEN),--open,)
+
+notes:
+	@test -n "$(R)" || { echo 'usage: make notes R=<report> [V=<vault>]'; exit 1; }
+	@$(VAULT) notes $(R)
+
+# ── the vault as a whole ─────────────────────────────────────────────────────
+
+brand-preview:
+	@$(VAULT) brand preview $(if $(PACK),--pack $(PACK),) $(if $(PPI),--ppi $(PPI),)
+
+# Commits only. PUSH=1 also pushes, and refuses rather than forces — see the
+# refusal list at the top of engine/gitsync.py.
+sync:
+	@$(VAULT) sync $(if $(M),-m "$(M)",) $(if $(PUSH),--push,)
+
+# Speaks JSON-RPC on stdin/stdout, so nothing here may print. Useful mostly for
+# checking the server starts; an agent launches it from its own MCP config.
+mcp:
+	@$(VAULT) mcp
 
 watch:
 	@test -n "$(R)" || { echo 'usage: make watch R=<report> [V=<vault>]'; exit 1; }
@@ -76,6 +180,10 @@ watch:
 
 doctor:
 	@$(VAULT) doctor
+
+# No vault needed: this is a fact about the engine, not about a folder.
+version:
+	@$(CLI) --version
 
 test:
 	@$(PY) -m unittest discover -s tests -v
@@ -96,8 +204,35 @@ app-build: app-deps
 app-smoke: app-deps
 	@cd app && npm run smoke
 
+# A distributable carries the engine with it: electron-builder copies engine/
+# and bin/ into the bundle's resources, which is where the app already looks.
+# Unsigned by design — see the comment in app/electron-builder.yml for what a
+# signed, notarised build needs in the environment.
+.PHONY: app-dist
+app-dist: app-deps
+	@cd app && npm run dist
+
 app-deps:
 	@test -d app/node_modules || (cd app && npm install --no-audit --no-fund)
+
+# ── installing it on this machine ────────────────────────────────────────────
+#
+# `make install` is the morning command: prerequisites, the CLI symlinked into
+# ~/.local/bin, the app built, packaged with electron-builder's `dir` target and
+# copied into /Applications. It deliberately does not depend on app-deps — the
+# script decides whether `npm install` is needed and says so, because the point
+# of it is that every step announces itself.
+#
+# The logic lives in the script rather than here because it writes outside the
+# repository, and that needs guards a recipe cannot express: a bundle already at
+# the destination is identified by its CFBundleIdentifier before anything is
+# removed. Never sudo. See INSTALL.md.
+.PHONY: install uninstall
+install:
+	@./scripts/install-app.sh
+
+uninstall:
+	@./scripts/install-app.sh --uninstall
 
 clean:
 	@$(VAULT) clean

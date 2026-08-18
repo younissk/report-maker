@@ -12,17 +12,31 @@
 # Every key here reaches the References section whether or not a @key points at
 # it, so the section doubles as the inventory of what was reviewed.
 
-example-page:
+repository:
   type: Web
-  title: "Example — the page title as published"
-  author: Example Ltd
+  title: "report-maker — the engine this vault is built by"
+  author: Youniss Kandah
   url:
-    value: https://example.com/page
-    date: 2026-01-01
+    value: https://github.com/younissk/report-maker
+    date: 2026-08-16
 
-own-measurement:
+house-rule:
   type: Misc
-  title: "Direct measurement of the thing we measured"
-  author: "Youniss Kandah"
-  date: 2026-01-01
-  note: "Own measurement. Command in the appendix."
+  title: "CLAUDE.md — the repository's own statement of the citation rule"
+  author: Youniss Kandah
+  date: 2026-08-16
+  note: "Read from the working tree the build in the colophon was made from."
+
+rule-inventory:
+  type: Misc
+  title: "Count of the codes report-maker check enforces, by subsystem"
+  author: Youniss Kandah
+  date: 2026-08-16
+  note: "Our own count over engine/. The command is in Appendix A."
+
+data-rule-coverage:
+  type: "Misc"
+  title: "Rule coverage by subsystem — the counted export"
+  author: "own data"
+  date: "2026-08-18"
+  note: "sha256:e5f4126d2b777c428d361f7b66296ed3468fda415478678155a48c4110fc5e31 · 5 rows × 4 columns · data/rule-coverage.csv"

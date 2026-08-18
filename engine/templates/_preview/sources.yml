@@ -1,0 +1,35 @@
+# Bibliography for the brand specimen.
+#
+# The specimen is a real document, so it obeys the rule it demonstrates: what it
+# states about the pack is read out of the pack at render time and cited to it,
+# and what it says about the result is marked as assessment.
+#
+# Nothing here is a claim about the outside world. Every entry is something on
+# this machine that a reader can open, which is why the specimen needs no network
+# and its References section is honest without one.
+
+brand-pack:
+  type: Misc
+  title: "Brand pack {{pack}}, as resolved when this specimen was rendered"
+  author: report-maker
+  date: {{today}}
+  note: "The engine default with brand/{{pack}}/brand.json merged over it. Every number, colour and length in this document is read from it at render time."
+
+engine-brand:
+  type: Misc
+  title: "The engine default brand pack"
+  author: report-maker
+  note: "engine/brand/brand.json — the values a pack inherits for every key it does not set itself."
+
+components:
+  type: Misc
+  title: "Report components and the house style they implement"
+  author: report-maker
+  note: "engine/templates/base/components.typ and theme.typ — the source of every component exercised in this specimen."
+
+preview-command:
+  type: Misc
+  title: "Rendering of this specimen"
+  author: report-maker
+  date: {{today}}
+  note: "Command: report-maker brand preview --pack {{pack}}. Output in .build/brand-preview/{{pack}}/."

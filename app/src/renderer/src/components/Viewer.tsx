@@ -8,6 +8,12 @@ type Props = {
   /** Bumped after a build, to force a reload of the same path. */
   revision: number
   building: boolean
+  /**
+   * Which page to open at — the shell's cursor→page estimate, or null when it
+   * has none. It is an estimate and it is treated as one: it moves the viewer,
+   * which the reader can scroll away from, and nothing else depends on it.
+   */
+  page?: number | null
 }
 
 /**
@@ -17,7 +23,7 @@ type Props = {
  * than pointed at with a file:// URL — the renderer is served over http in dev,
  * so a file:// frame would be blocked, and a blob works identically in both.
  */
-export function Viewer({ vault, pdf, revision, building }: Props) {
+export function Viewer({ vault, pdf, revision, building, page = null }: Props) {
   const [url, setUrl] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
 
@@ -76,10 +82,14 @@ export function Viewer({ vault, pdf, revision, building }: Props) {
     )
   }
 
+  // Keyed on the page as well as the blob, because Chromium's viewer reads the
+  // fragment once, when the frame loads: changing `src#page=` on a live iframe
+  // is a same-document navigation the plugin never hears about. Remounting is
+  // what actually scrolls it, and it is cheap — the blob is already in memory.
   return (
     <iframe
-      key={url}
-      src={`${url}#view=FitH&toolbar=1`}
+      key={`${url}:${page ?? 1}`}
+      src={`${url}#page=${page ?? 1}&view=FitH&toolbar=1`}
       title="Built report"
       className="h-full w-full border-0 bg-neutral-900"
     />

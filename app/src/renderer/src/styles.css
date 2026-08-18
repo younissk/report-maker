@@ -27,6 +27,21 @@
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
+
+  /* The citation rule, as four colours. The editor's evidence rail publishes its
+     own `--rm-rail-*` from the chosen syntax theme; these are the app chrome's
+     copy, for the density bar in the status bar and the dashboard, so a report
+     read at a glance in the gutter and read as a percentage in the bar are the
+     same three colours. Deliberately restrained — the point is to tell three
+     classes apart, not to decorate. */
+  --rail-cited: oklch(0.55 0.11 220);
+  --rail-assessed: oklch(0.62 0.09 85);
+  --rail-unmarked: oklch(0.62 0.2 25);
+  --rail-neutral: var(--border);
+
+  /* Set at runtime by lib/settings.ts from `appearance.accent`; declared here so
+     anything reading it before settings load gets the app's own primary. */
+  --app-accent: var(--primary);
 }
 
 .dark {
@@ -49,6 +64,13 @@
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
+
+  /* Lifted, not inverted: the same three hues have to survive on a dark ground
+     at 6px tall. */
+  --rail-cited: oklch(0.68 0.12 220);
+  --rail-assessed: oklch(0.75 0.11 85);
+  --rail-unmarked: oklch(0.7 0.19 25);
+  --rail-neutral: var(--border);
 }
 
 @theme inline {
@@ -71,6 +93,10 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-rail-cited: var(--rail-cited);
+  --color-rail-assessed: var(--rail-assessed);
+  --color-rail-unmarked: var(--rail-unmarked);
+  --color-rail-neutral: var(--rail-neutral);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -95,30 +121,44 @@
   }
 }
 
-/* CodeMirror, dressed in the same tokens rather than its own theme. */
+/* The three answers the citation rule gives, as painted surfaces. Used by the
+   status bar's density meter and anything else that draws the same split; the
+   editor's rail draws its own from the syntax theme. */
+.rail-cited {
+  background-color: var(--rail-cited);
+}
+.rail-assessed {
+  background-color: var(--rail-assessed);
+}
+.rail-unmarked {
+  background-color: var(--rail-unmarked);
+}
+.rail-neutral {
+  background-color: var(--rail-neutral);
+}
+
+/* CodeMirror.
+   Typography, colours, gutters and the selection now come from
+   `lib/cmtheme.ts`, which builds them from the editor settings — a rule here
+   would be a second opinion that the settings screen cannot move. What is left
+   is the two things no theme decides: the editor fills its pane, and it does
+   not draw a focus ring inside a pane that already has a border. */
 .cm-editor {
   height: 100%;
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
 }
 .cm-editor.cm-focused {
   outline: none;
 }
-.cm-gutters {
-  background-color: var(--background);
-  color: var(--muted-foreground);
-  border-right: 1px solid var(--border);
+
+/* Compact density scales the root font size, which carries every rem-based
+   utility with it. These are the exceptions: the app's chrome uses a handful of
+   fixed pixel sizes for the smallest labels, and they have to be told. */
+:root[data-density='compact'] .text-\[11px\] {
+  font-size: 10.5px;
 }
-.cm-activeLine,
-.cm-activeLineGutter {
-  background-color: color-mix(in oklab, var(--muted) 55%, transparent);
+:root[data-density='compact'] .text-\[10px\] {
+  font-size: 9.5px;
 }
-.cm-selectionBackground,
-.cm-editor ::selection {
-  background-color: color-mix(in oklab, var(--ring) 35%, transparent) !important;
-}
-.cm-cursor {
-  border-left-color: var(--foreground);
+:root[data-density='compact'] .text-\[12\.5px\] {
+  font-size: 12px;
 }
