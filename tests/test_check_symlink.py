@@ -215,7 +215,22 @@ class AnInternalLink(Vault):
 class ABrokenLink(Vault):
     """A dangling link must not crash the walk. Where it *points* still decides
     whether it is a finding: the target of an escaping one is one `mkdir` away
-    from existing, and the folder travels to machines where it already does."""
+    from existing, and the folder travels to machines where it already does.
+
+    A *looping* link is the other species, and the two are told apart on purpose:
+    a dangling link names a place, and that place can be held against the vault
+    root; a loop names none, so there is nothing to hold and no file at the end of
+    it on any machine — not a leak, and so not a finding.
+
+    These tests are worth more than they look, because the platform difference
+    they cover is invisible on a developer's machine. Up to Python 3.12 a
+    non-strict `Path.resolve()` on a loop raises `RuntimeError("Symlink loop
+    from …")`; 3.13 and later return the path unresolved. CI pins 3.11, which is
+    why it saw a crash a 3.13+ mac could not — reproduce it locally with
+    `python3.12 -m unittest tests.test_check_symlink`. The engine now classifies
+    with `os.path.realpath` and an errno, so every assertion here holds the same
+    on every supported version rather than describing one of them.
+    """
 
     def test_a_dangling_link_inside_the_vault_does_not_crash_and_is_not_a_finding(self) -> None:
         report = self.report()
@@ -230,6 +245,17 @@ class ABrokenLink(Vault):
         self.assertFalse((report.folder / "gone").exists())
         self.assertEqual([f.code for f in self.leaks(report)], ["E015"])
 
+    def test_a_dangling_link_to_a_missing_directory_outside_is_a_finding(self) -> None:
+        """`target_is_directory=True` is what the caller believed it was linking
+        to, and nothing about the rule may rest on that belief: the target does
+        not exist, so nothing can be stat'd, and the decision has to come from the
+        path the link names."""
+        report = self.report()
+        (report.folder / "gonedir").symlink_to(
+            self.outside / "not-here-yet", target_is_directory=True
+        )
+        self.assertEqual([f.code for f in self.leaks(report)], ["E015"])
+
     def test_a_self_referential_link_does_not_crash_the_walk(self) -> None:
         """A loop resolves to nothing on any platform. Whatever it is judged to
         be, `check` has to come back rather than raise."""
@@ -239,6 +265,87 @@ class ABrokenLink(Vault):
         self.assertEqual(
             [f.code for f in self.findings(report) if f.code != "E015"], []
         )
+
+    def test_a_self_referential_link_is_not_a_leak(self) -> None:
+        """The decision, pinned. There is no file behind a loop to typeset, so
+        E015 would be a false statement — and it is the one code `draft` cannot
+        soften, so it would hard-fail a build with a security story that is not
+        true."""
+        report = self.report()
+        os.symlink("loop", report.folder / "loop")
+        self.assertEqual(self.leaks(report), [])
+
+    def test_a_mutual_loop_is_the_same_answer(self) -> None:
+        """`a -> b -> a` is the shape that arrives from two innocent links rather
+        than one silly one, and the kernel reports it identically."""
+        report = self.report()
+        os.symlink("b", report.folder / "a")
+        os.symlink("a", report.folder / "b")
+        self.assertEqual(self.codes(report), [])
+
+    def test_a_loop_and_a_dangling_escape_are_told_apart(self) -> None:
+        """Both are links that resolve to no file. Only one of them names a place
+        outside the vault, and only that one is a finding."""
+        report = self.report()
+        os.symlink("loop", report.folder / "loop")
+        (report.folder / "gone").symlink_to(self.outside / "not-here-yet" / "passwd")
+        found = self.leaks(report)
+        self.assertEqual([f.path.name for f in found], ["gone"])
+
+    def test_a_loop_does_not_stop_the_walk_reaching_a_later_link(self) -> None:
+        """The bug this class exists for was not that a loop was misjudged — it
+        was that resolving one raised, out of a walk with no per-link guard, so
+        every link after it went uninspected and `check` died on a vault it was
+        written to inspect.
+
+        The names are alphabetical on purpose: `os.walk` hands back sorted
+        directories and then sorted files, so `a-loop` is resolved before
+        `z-passwd`, and `diagrams/` is not reached until the top level is done.
+        A fixture that happened to put the loop last could not fail."""
+        report = self.report()
+        os.symlink("a-loop", report.folder / "a-loop")
+        (report.folder / "z-passwd").symlink_to(self.outside / "passwd")
+        (report.folder / "diagrams").mkdir()
+        (report.folder / "diagrams" / "z-key").symlink_to(
+            self.outside / "deeper" / "id_rsa"
+        )
+        self.assertEqual(
+            sorted(f.path.name for f in self.leaks(report)), ["z-key", "z-passwd"]
+        )
+
+    def test_a_loop_behind_a_link_out_of_the_vault_is_still_a_leak(self) -> None:
+        """The boundary of the decision. The link itself resolves — it names
+        `<outside>/loopdir/passwd`, a place outside the vault — and that the
+        directory in the middle of it happens to loop today is exactly the
+        "whether the target exists" question the rule already refuses to ask."""
+        report = self.report()
+        os.symlink("loopdir", self.outside / "loopdir")
+        (report.folder / "x").symlink_to(self.outside / "loopdir" / "passwd")
+        self.assertEqual([f.code for f in self.leaks(report)], ["E015"])
+
+    def test_the_reporter_prints_a_looping_link_rather_than_raising(self) -> None:
+        """`relative` was the crash site, not the resolution the rule guards: it
+        is called for every finding's path, before the target is ever looked at.
+        A reporter that raises turns a surprise into a build failure naming
+        neither the link nor the report."""
+        report = self.report()
+        loop = report.folder / "loop"
+        os.symlink("loop", loop)
+        self.assertEqual(
+            check.relative(loop, self.cfg.root), "reports/2026-01-01-pricing/loop"
+        )
+
+    def test_a_whole_vault_check_survives_a_loop(self) -> None:
+        """End to end, because the crash was in `check` and not in the rule: a
+        vault that merely contains a silly link has to lint, print and exit."""
+        report = self.report()
+        os.symlink("loop", report.folder / "loop")
+        (report.folder / "passwd").symlink_to(self.outside / "passwd")
+        findings = check.check(self.cfg)
+        self.assertEqual([f.code for f in findings], ["E015"])
+        with redirect_stdout(io.StringIO()) as printed:
+            self.assertEqual(check.report_findings(self.cfg, findings), 1)
+        self.assertIn("reports/2026-01-01-pricing/passwd", printed.getvalue())
 
 
 # ── what the finding says, and what it does to a build ───────────────────────

@@ -400,7 +400,12 @@ passed through verbatim rather than summarised.
 Every other test reads source files, and none of them can see the failure that
 matters most to a document tool: the design broke. `tests/test_render.py`
 renders page 1 of each example report and compares a perceptual hash against
-`tests/golden/<id>.hash`.
+`tests/golden/<platform>/<id>.hash`. The platform segment is `sys.platform`, and
+it is there because a golden is a recording of one machine rather than a fact
+about the repository: the page is a rendering, a rendering is a function of the
+font book that produced it, and the brand names faces macOS has and Linux does
+not. One flat directory quietly asserted the opposite, and the first CI run on
+two operating systems was the thing that noticed.
 
 `imagehash.py` is the PNG decoder that makes that possible without a dependency:
 `zlib` inflates, the five PNG filters are undone scanline by scanline, and the
@@ -414,5 +419,15 @@ RGB, RGBA, palette) raises rather than guessing.
 Tolerance is 6 bits, measured: rerendering the demo vault at 150 ppi instead of
 110 moves the hash by one. A failure is not automatically a bug — look at the
 page, and if the new design is right, re-record with
-`REPORT_MAKER_UPDATE_GOLDEN=1`. The module skips entirely when Typst is not
-installed.
+`REPORT_MAKER_UPDATE_GOLDEN=1` — on every platform that has a folder, or the
+others start failing the moment the design moves on purpose.
+
+The module skips in three cases, and each of them is "this machine cannot
+answer" rather than "the answer is yes": Typst is not installed, this platform
+has no recordings, or a family the brand asks for first is missing from `typst
+fonts`. The last is the subtle one. With the brand's faces absent Typst renders
+in its own fallbacks, and the hash stops responding to the brand at all
+— editing `fonts.display` would not move a single bit — so a pass there would be
+structurally blind to the whole class of change the test exists to catch. Past
+those three, a report with no golden is a failure and not a skip: the platform
+demonstrably has recordings, so an unrecorded report is one nobody approved.

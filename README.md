@@ -925,10 +925,19 @@ an oversized body and a cross-site write. The build tests skip without Typst.
 
 `tests/test_render.py` is the exception to "tests read source files": it renders
 page 1 of each example report and compares a perceptual hash against
-`tests/golden/<id>.hash`, which is the only way to catch the failure where the
-engine is happy, `check` is green, and the cover page has moved two centimetres.
-It skips when Typst is not installed. A failure there is not automatically a bug
-— look at the page, and if the new design is right, re-record:
+`tests/golden/<platform>/<id>.hash`, which is the only way to catch the failure
+where the engine is happy, `check` is green, and the cover page has moved two
+centimetres. The hash is recorded per platform because it is a recording of one
+machine and not a fact about the repository — it carries that box's fonts, its
+Typst build and its rasteriser, and the brand names faces macOS has and Linux
+does not. For the same reason the module skips rather than grading a page Typst
+had to set in fallback fonts: with the brand's families missing the hash stops
+responding to the brand, so a pass would be blind to exactly the change this
+test is for. It also skips when Typst is not installed, or when nobody has
+recorded goldens for this platform.
+
+A failure there is not automatically a bug — look at the page, and if the new
+design is right, re-record, on each platform that has a folder:
 
 ```bash
 REPORT_MAKER_UPDATE_GOLDEN=1 python3 -m unittest tests.test_render

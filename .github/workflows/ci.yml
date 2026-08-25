@@ -42,6 +42,13 @@ env:
   # The declared floor in README.md ("Python 3.11+"). Testing the floor is the
   # only version test worth having when there are no dependencies to conflict.
   PYTHON_VERSION: '3.11'
+  # Pinned for the same reason Typst is. Node is not a dependency of the engine,
+  # but it is a dependency of what the engine renders: `report-maker diagrams`
+  # installs mermaid-cli and runs it, and a mermaid that renders differently
+  # changes a figure in a report. The runner's default Node moved from 20 to 24
+  # under this repository without a commit of ours, and an unpinned toolchain is
+  # a variable in every result the matrix reports.
+  NODE_VERSION: '22'
 
 jobs:
   suite:
@@ -59,6 +66,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+
+      # This job has no JavaScript of its own, and needs Node anyway: the demo
+      # vault has a diagram, and `report-maker all` renders it by installing
+      # mermaid-cli into the vault's .build/ and running it. Without this the
+      # engine picks up whatever Node the image happens to ship, which is the
+      # one part of the toolchain that was moving on its own.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       # Straight from the release, rather than through a third-party action:
       # the pin is then visible in this file and there is no second supply
@@ -97,19 +113,34 @@ jobs:
         uses: actions/cache@v4
         with:
           path: examples/demo-vault/.build/mermaid
-          key: mermaid-${{ runner.os }}-${{ hashFiles('engine/config.py', 'examples/demo-vault/report-maker.toml') }}
+          key: mermaid-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('engine/config.py', 'examples/demo-vault/report-maker.toml') }}
 
-      # NOTE, measured on 2026-08-25 and not yet fixed: this step is expected to
-      # fail on ubuntu-latest, in tests/test_render.py, and the cause is fonts
-      # rather than code. The demo vault's brand pack asks for Didot, Helvetica
-      # Neue and Menlo — macOS system faces with no Linux equivalent — so Typst
-      # substitutes and the layout moves. Rendering the demo vault with
-      # `--ignore-system-fonts` puts `examples/2026-08-16-brief-example` 13 bits
-      # from its golden hash against a tolerance of 6 (the other report moves 2
-      # and passes). Two honest fixes, neither of them in this file: record the
-      # golden hashes per platform, or move the demo vault's brand pack onto
-      # faces Typst embeds. Do not reach for a skip — see CLAUDE.md, "Do not
-      # weaken a rule to pass a build."
+      # RESOLVED 2026-08-25, and worth knowing before anyone reads a skip in
+      # tests/test_render.py as this rule going soft. This step used to fail on
+      # ubuntu-latest for fonts rather than code: the demo vault's brand pack
+      # asks for Didot, Helvetica Neue and Menlo — macOS system faces with no
+      # Linux equivalent — so Typst substitutes here and page 1 legitimately
+      # lands 13 bits from a hash that was recorded on a Mac, against a
+      # tolerance of 6. The golden hashes are now recorded per platform, under
+      # `tests/golden/<sys.platform>/`, which was the first of the two honest
+      # fixes named here. The tolerance was NOT widened: one wide enough to span
+      # two font stacks is wide enough to miss the design change the test
+      # exists to catch.
+      #
+      # The module additionally skips when the brand's first-choice families are
+      # absent, which is this runner. That is "this machine cannot answer",
+      # not a suppression: with those faces missing the hash stops responding to
+      # the brand at all — editing `fonts.display` would not move a bit — so a
+      # pass would be structurally blind to the change being gated, and a false
+      # green is worse than a skip. It is the same shape as the skipUnless(TYPST)
+      # already in the module.
+      #
+      # The second honest fix is still open, and it is the one that makes this
+      # leg earn its keep: move the brand pack onto faces Typst embeds
+      # (Libertinus Serif, New Computer Modern, DejaVu Sans Mono). Then both
+      # platforms render the same page, one golden serves everywhere, and the
+      # font skip stops firing. That is a design decision about how every report
+      # in the repository looks, not a CI fix, which is why it is not done here.
       - name: Engine tests
         run: make test
 
@@ -154,7 +185,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: |
             app/package-lock.json

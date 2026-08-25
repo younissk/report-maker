@@ -7,8 +7,12 @@
 # every `@key`. It fetches nothing — no stylesheet, no script, no font — so it
 # works from Pages, from a USB stick, and from a machine with no network.
 #
-# Nothing here parses a report. The site is assembled from `out/manifest.json`,
-# which the engine writes and which names every artefact relative to the vault.
+# Nothing here parses a report. The site is assembled from the manifest the
+# engine writes, which names every report and every artefact it built — with one
+# gap: `artifacts` lists the PDF and the page images but not the HTML bundle, so
+# the bundle's path is recomputed the way `engine/html.py` computes it, from the
+# vault's `out` directory and the report id. Closing that gap is engine-side
+# work (`artifacts.html` in `engine/manifest.py`), not work for this file.
 
 name: pages
 
@@ -37,6 +41,13 @@ env:
   # The same pin as ci.yml. The two have to move together — the page images in
   # these bundles are Typst's output, and a release can paginate differently.
   TYPST_VERSION: '0.15.1'
+  # Also the same pin as ci.yml, and pinned at all because the runner's default
+  # Node moves without asking — it moved from 20 to 24 under this very
+  # repository. The engine installs mermaid-cli under whatever Node it finds to
+  # render the diagrams that end up on these pages, so the version is part of
+  # the rendering and belongs beside the Typst pin rather than in the runner's
+  # release notes.
+  NODE_VERSION: '22'
 
 jobs:
   build:
@@ -45,9 +56,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # First, before anything is compiled. Pages has to be switched on for the
+      # repository before a deployment has anywhere to land, and if it is not,
+      # that answer is worth twenty seconds rather than a full Typst build.
+      #
+      # `enablement: true` asks the API to switch it on using the `pages: write`
+      # token above, which is the whole fix in the ordinary case. The call can
+      # still be refused — a private repository on a plan without Pages, or a
+      # token whose scope was narrowed — and when it is, the action's own
+      # message is `HttpError: Not Found`, which names neither the cause nor the
+      # cure. So the failure is tolerated here and read in the next step, which
+      # is the one that ends the job.
+      - name: Enable and configure Pages
+        id: pages
+        continue-on-error: true
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Pages could not be enabled
+        if: steps.pages.outcome != 'success'
+        shell: bash
+        run: |
+          echo "::error::GitHub Pages is not enabled for ${GITHUB_REPOSITORY} and this" \
+               "workflow could not enable it. Open" \
+               "https://github.com/${GITHUB_REPOSITORY}/settings/pages," \
+               "set 'Build and deployment' → Source to 'GitHub Actions', and re-run." \
+               "If that page offers no such option the repository is private on a plan" \
+               "without Pages: make it public, or upgrade the account."
+          exit 1
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      # Pinned rather than ambient: see NODE_VERSION above. The engine reaches
+      # for Node only when a diagram needs re-rendering, which is exactly when
+      # an unannounced Node bump would change what these pages show.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Typst ${{ env.TYPST_VERSION }}
         shell: bash
@@ -65,7 +113,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: examples/demo-vault/.build/mermaid
-          key: mermaid-${{ runner.os }}-${{ hashFiles('engine/config.py', 'examples/demo-vault/report-maker.toml') }}
+          key: mermaid-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('engine/config.py', 'examples/demo-vault/report-maker.toml') }}
 
       # `--html` adds the bundles, after `pages` because the bundle inlines the
       # page images, and before `check`, which stays last and gates the whole
@@ -79,25 +127,35 @@ jobs:
           python3 - "examples/demo-vault" "_site" "$GITHUB_REPOSITORY" <<'PY'
           """Assemble the Pages site from a built vault.
 
-          Reads out/manifest.json — the engine's own description of the vault —
-          copies each report's self-contained bundle into _site/, and writes an
-          index over them. Every fact on the page comes from the manifest, and
-          the bundle itself is passed through byte for byte.
+          Reads the manifest — the engine's own description of the vault — copies
+          each report's self-contained bundle into _site/, and writes an index over
+          them. Every fact on the page comes from the manifest, and the bundle
+          itself is passed through byte for byte.
+
+          The one thing the manifest does not carry is the bundle's own path:
+          `engine/html.py` writes `<out>/<report id>.html` and records nothing,
+          because `artifacts` only lists the PDF and the page images. So the path
+          is computed here from the same two facts the engine uses — the vault's
+          `out` directory, read from report-maker.toml rather than assumed, and
+          the report id. Deriving it from the PDF entry instead, as this did,
+          drops a perfectly good bundle whenever that entry is null, and says
+          "no PDF" about a report whose real problem is something else.
           """
 
           import html
           import json
           import shutil
           import sys
+          import tomllib
           from pathlib import Path
 
           vault = Path(sys.argv[1]).resolve()
           site = Path(sys.argv[2]).resolve()
           repo = sys.argv[3] if len(sys.argv) > 3 else "younissk/report-maker"
 
-          manifest = json.loads(
-              (vault / "out" / "manifest.json").read_text(encoding="utf-8")
-          )
+          config = tomllib.loads((vault / "report-maker.toml").read_text(encoding="utf-8"))
+          out = vault / config.get("vault", {}).get("out", "out")
+          manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
 
           # The accent comes from the vault's own brand pack, so the index is
           # coloured by the same decision the reports are. Design tokens live in
@@ -117,15 +175,10 @@ jobs:
           for report in manifest.get("reports", []):
               rid = report["id"]
               art = report.get("artifacts", {})
-              pdf_rel = art.get("pdf")
-              if not pdf_rel:
-                  missing.append(f"{rid}: no PDF in the manifest — it was never built")
-                  continue
 
-              # The bundle sits beside the PDF under the same report id. Derived
-              # from the manifest's own path rather than assuming "out/",
-              # because report-maker.toml can move it.
-              bundle = vault / Path(pdf_rel).with_suffix(".html")
+              # The bundle is what this site is for, so it is what decides whether
+              # a report is published. Exactly where `report-maker html` put it.
+              bundle = out / f"{rid}.html"
               if not bundle.is_file():
                   missing.append(f"{rid}: no HTML bundle at {bundle.relative_to(vault)}")
                   continue
@@ -134,13 +187,18 @@ jobs:
               dest.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(bundle, dest)
 
-              pdf_src = vault / pdf_rel
-              if pdf_src.is_file():
+              # The PDF is the extra link on the card, not the reason for it: a
+              # bundle carries the whole report and its evidence on its own.
+              pdf_rel = art.get("pdf")
+              pdf_src = vault / pdf_rel if pdf_rel else None
+              has_pdf = bool(pdf_src and pdf_src.is_file())
+              if has_pdf:
                   shutil.copy2(pdf_src, site / f"{rid}.pdf")
 
               # Report titles and subtitles are user text. Escaped, every one.
               meta = report.get("meta", {})
               e = html.escape
+              pdf_link = f'<a href="{e(rid)}.pdf">PDF</a>' if has_pdf else ""
               cards.append(
                   f'<li class="card">'
                   f'<a class="card-link" href="{e(rid)}.html">'
@@ -152,7 +210,7 @@ jobs:
                   f'</a>'
                   f'<p class="meta"><span>{e(rid)}</span>'
                   f'<span>{e(str(art.get("page_count", "?")))} pages</span>'
-                  f'<a href="{e(rid)}.pdf">PDF</a></p>'
+                  f'{pdf_link}</p>'
                   f'</li>'
               )
               published += 1
@@ -161,7 +219,28 @@ jobs:
               print(f"::warning::{line}")
 
           if not published:
+              # "Nothing to put on Pages" is the symptom. Which of the two causes it
+              # was is knowable right here, so say it: either the vault built no
+              # reports at all, or it built reports without bundles — which is what
+              # `report-maker all` does when nobody passes `--html`.
               print("::error::no report bundle was published — nothing to put on Pages")
+              if not manifest.get("reports"):
+                  print(
+                      f"::error::the manifest for {vault.name} lists no reports at"
+                      " all, so there was never anything to publish. Read the build"
+                      " step above, and `report-maker -C <vault> doctor`."
+                  )
+              else:
+                  print(
+                      "::error::the vault has reports but no bundle for any of them."
+                      " `report-maker -C <vault> all` alone writes PDFs; the bundles are"
+                      " what `--html` adds. `report-maker -C <vault> html` writes them"
+                      " on their own."
+                  )
+              found = sorted(out.rglob("*.html")) if out.is_dir() else []
+              print(f"{len(found)} .html file(s) under {out.relative_to(vault)}:")
+              for path in found:
+                  print(f"  {path.relative_to(vault)}")
               raise SystemExit(1)
 
           title = "report-maker — the demo vault"
@@ -293,8 +372,6 @@ jobs:
           print(f"checked {len(files)} file(s); {bad} remote subresource(s)")
           raise SystemExit(1 if bad else 0)
           PY
-
-      - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:

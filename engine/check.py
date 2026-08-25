@@ -81,6 +81,7 @@ suppresses anything in a report that calls itself final.
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 from dataclasses import dataclass, replace
@@ -174,12 +175,42 @@ class Finding:
         return f"  {self.level:<7} {self.code}  {relative(self.path, root)}:{self.line}  {self.message}"
 
 
+def _realpath(path: Path) -> Path:
+    """`path` with its symlinks followed, and never an exception.
+
+    `Path.resolve()` is the obvious call and it is the wrong one, because what
+    it does to a symlink loop depends on the interpreter: up to Python 3.12 a
+    non-strict `resolve()` follows itself up with a `stat()` and turns the
+    kernel's `ELOOP` into `RuntimeError("Symlink loop from …")`, while 3.13 and
+    later return the path with the loop left unresolved. A rule that walks a
+    folder of links somebody else wrote cannot give two different answers on two
+    Pythons, and it certainly cannot raise: a linter that dies on the input it
+    was written to inspect fails the whole build for the wrong reason, and the
+    traceback names neither the link nor the report.
+
+    `os.path.realpath` is the same resolution with neither behaviour. Non-strict
+    it swallows every `OSError` and returns as far as it got, identically on
+    every version this engine supports. What it will not tell us is *why* it
+    stopped, which is `_unfollowable`'s job.
+    """
+    try:
+        return Path(os.path.realpath(path))
+    except (OSError, ValueError):  # pragma: no cover — a path with a NUL in it
+        # Even a path this process cannot normalise has to be printable, since
+        # the only reason we are holding it is to say something about it.
+        return path
+
+
 def relative(path: Path, root: Path) -> str:
     """A path as the vault sees it: relative, POSIX, no leading `./`.
 
     A finding about a file outside the vault should not be possible, but a
     reporter that raises instead of printing would turn a surprise into a
-    crash, so an outsider keeps its absolute path.
+    crash, so an outsider keeps its absolute path. That sentence was an
+    intention until the resolution moved to `_realpath`: this function is handed
+    the path of a link somebody else made, and `Path.resolve()` on a looping one
+    raises — which is how E015 came to crash `check` on the folder it was
+    inspecting rather than report on it.
 
     The lexical fallback exists for exactly one caller: an E015 finding is
     *about* a symlink, so resolving it lands on the target — outside the vault,
@@ -188,9 +219,10 @@ def relative(path: Path, root: Path) -> str:
     what it points at is not. Nothing else can reach this branch, because
     anything whose real path is inside the root is answered above.
     """
-    for candidate in (path.resolve(), path):
+    real_root = _realpath(root)
+    for candidate in (_realpath(path), path):
         try:
-            return candidate.relative_to(root.resolve()).as_posix()
+            return candidate.relative_to(real_root).as_posix()
         except ValueError:
             continue
     return path.as_posix()
@@ -777,6 +809,29 @@ def _data_findings(report: Report, src: str) -> list[Finding]:
 # on the machine it is opened on. So `/etc/nonexistent` is a finding and a
 # dangling link to a sibling report is not.
 #
+# **A loop is not a finding at all.** `loop -> loop`, or `a -> b -> a`, names no
+# place: resolution does not end somewhere the rule can hold against the root, it
+# does not end. The sentence above is what settles it — a link is judged by where
+# it points, a dangling one points outside the vault and a looping one points
+# nowhere, and there is no file at the end of it to typeset on any machine this
+# folder is ever opened on. Reporting E015 there would say a file nobody chose to
+# publish is about to appear in a PDF when none can, and E015 is the one code
+# `draft` cannot soften, so a silly link would hard-fail a build with a security
+# story that is not true. A rule whose count cannot be trusted is worse than the
+# rule not existing, which is the same reason the crash it replaced was worse.
+#
+# The case against silence is real and it is not this rule's: a loop can never
+# come good, and typst reading one fails with an `ELOOP` naming a path and no
+# report. But that is folder hygiene, it fails loudly in `build` on the report
+# that read it, and the code that means "a file is leaking" is the wrong place to
+# smuggle it. If the vault wants a hygiene pass it should get one, with its own
+# code, rather than borrowing the meaning of this one.
+#
+# A loop is also the only unfollowable link that gets this answer. Anything else
+# the process cannot follow — a permission missing along the chain, a name too
+# long — leaves the target genuinely unknown, and an unknown target is not a
+# demonstrated one, so it stays an error.
+#
 # **A detector, not the control.** `check` runs after `build` in `all`, and a
 # hostile author can reach for `status: "draft"`. This rule does not stop a
 # writer determined to read their own server's disk; the controls that do are the
@@ -803,6 +858,21 @@ def _outside(target: Path, root: Path) -> bool:
     return not (target == root or root in target.parents)
 
 
+def _unfollowable(link: Path) -> int | None:
+    """The errno the OS gives for following `link`, or `None` if it follows now.
+
+    Asked only about a link `_realpath` gave up on, and only to tell a loop from
+    everything else — the two get opposite answers here, and no resolver reports
+    which one it hit. `stat` follows the link and so answers for the whole chain,
+    which is the question: one loop anywhere in it and nothing comes back.
+    """
+    try:
+        link.stat()
+    except OSError as exc:
+        return exc.errno
+    return None  # pragma: no cover — the link was repaired mid-walk
+
+
 def _symlink_findings(report: Report, root: Path) -> list[Finding]:
     """E015 — every symlink in the report folder whose target leaves the vault.
 
@@ -811,12 +881,15 @@ def _symlink_findings(report: Report, root: Path) -> list[Finding]:
     load-bearing). A link to a directory therefore arrives in `dirnames` and is
     reported without being descended into — which is both what the rule wants and
     what stops a link to `/` from walking the disk.
+
+    Resolution is per link and cannot raise, so no single link can end the walk
+    and leave the rest of the folder uninspected. Three outcomes: it resolves,
+    and the rule holds the target against the root; it loops, and points nowhere
+    at all, which is not a finding (see the section comment above); or it cannot
+    be followed for some other reason, and an unknown target is an error.
     """
     out: list[Finding] = []
-    try:
-        root = root.resolve()
-    except OSError:  # pragma: no cover — an unreadable vault root
-        return out
+    root = _realpath(root)
 
     for parent, dirnames, filenames in os.walk(report.folder, followlinks=False):
         base = Path(parent)
@@ -825,23 +898,28 @@ def _symlink_findings(report: Report, root: Path) -> list[Finding]:
             if not link.is_symlink():
                 continue
             here = relative(link, root)  # for the read() the message shows
-            try:
-                target = link.resolve()
-            except OSError as exc:
-                # A link this process cannot resolve — a loop, or a path too
-                # long. Reported rather than skipped: the rule's claim is that
-                # every link is inside the vault, and one that cannot be resolved
-                # is one that has not been shown to be.
+            # Each link is resolved on its own, and nothing here may raise: the
+            # walk is over a folder of links this engine did not create, so one
+            # bad link is an ordinary input, not the end of the inspection.
+            target = _realpath(link)
+            if target.is_symlink():
+                # `_realpath` stopped on a link it could not follow, so `target`
+                # still ends in one and names no place to hold against the root.
+                # Why it stopped decides everything, and only the OS knows.
+                reason = _unfollowable(link)
+                if reason == errno.ELOOP:
+                    continue  # points nowhere, so it points nowhere outside
+                why = os.strerror(reason) if reason else "reason unknown"
                 out.append(
                     Finding(
                         "error",
                         "E015",
                         link,
                         1,
-                        "a symlink whose target cannot be resolved "
-                        f"({exc.strerror or exc}) — a link that cannot be shown "
-                        "to stay inside the vault. Delete it, or replace it with "
-                        "a copy of what it pointed at",
+                        f"a symlink whose target cannot be resolved ({why}) — a "
+                        "link that cannot be shown to stay inside the vault. "
+                        "Delete it, or replace it with a copy of what it "
+                        "pointed at",
                         report.id,
                     )
                 )
