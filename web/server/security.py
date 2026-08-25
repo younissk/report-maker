@@ -455,15 +455,39 @@ def _classify(ip: ipaddress._BaseAddress) -> str | None:
     The phrase names the address that actually tripped a predicate, which for a
     wrapped address is not the one in the URL — "a loopback address (127.0.0.1,
     wrapped inside ::ffff:127.0.0.1)" is the sentence that explains itself.
+
+    The wrappers are judged before the envelope, and that order is the whole of
+    it. This read the envelope first, and so never produced the sentence the
+    paragraph above describes: CPython's own predicates answer for the address
+    a wrapper contains, so `_class_of` returned a name for `::ffff:127.0.0.1`
+    itself and the unwrapped reading was never reached. `_ADDRESS_CLASSES` is
+    ordered most-damning-first precisely so a loopback answer is called
+    loopback and not merely private, and consulting the envelope threw that
+    guarantee away — as an IPv6 address `::ffff:127.0.0.1` is not in `::1/128`,
+    so on an interpreter whose `is_loopback` does not unwrap it answers False
+    to the precise predicate and True to the vague one, and the refusal said "a
+    private address" about loopback. True, and useless, which is the exact
+    sentence the ordering exists to prevent.
+
+    That also made the wording a function of the interpreter's patch release
+    rather than of the address. Between CPython 3.11.9 and 3.11.16 both what
+    these predicates answer for an IPv4-mapped address and how `str()` spells
+    one changed, and the CI matrix installed one of each for the same
+    `python-version: '3.11'` — which is how this was found. Judging the
+    unwrapped address first takes the envelope's predicates out of the sentence
+    altogether, so every supported Python produces the same words.
+
+    Nothing about *whether* an address is refused moves: this returns None in
+    exactly the cases it did before, when no reading of the address trips
+    anything. Only the sentence changes.
     """
-    for wrapped in _embedded(ip):
+    envelope, *wrappers = _embedded(ip)
+    for wrapped in wrappers:
         name = _class_of(wrapped)
-        if name is None:
-            continue
-        if wrapped is ip:
-            return f"a {name} address"
-        return f"a {name} address ({wrapped}, wrapped inside {ip})"
-    return None
+        if name is not None:
+            return f"a {name} address ({wrapped}, wrapped inside {ip})"
+    name = _class_of(envelope)
+    return f"a {name} address" if name is not None else None
 
 
 def _class_of(ip: ipaddress._BaseAddress) -> str | None:

@@ -418,13 +418,39 @@ class SsrfTests(unittest.TestCase):
                 self.assertEqual(caught.exception.code, "url_blocked")
 
     def test_an_ipv4_address_wrapped_in_ipv6_is_unwrapped_before_judging(self):
-        # ::ffff:127.0.0.1 is loopback to the network stack and answers False
-        # to IPv6Address.is_loopback. Judging the envelope would let it through.
+        """::ffff:127.0.0.1 is loopback to the network stack, and an envelope
+        the guard must open rather than judge.
+
+        The refusal has to name the address that actually tripped, and call it
+        by its most specific name. Both halves are asserted because both have
+        been wrong: the guard read the envelope first, so it reported whatever
+        CPython's predicates happened to say about `::ffff:127.0.0.1` itself,
+        which on 3.11.9 is "private" — true of loopback, and useless, since
+        every loopback address is also private.
+
+        What is deliberately *not* asserted is how the envelope is spelled.
+        CPython prints this address as `::ffff:7f00:1` on 3.11.9 and
+        `::ffff:127.0.0.1` on 3.11.16, and asserting on the second spelling is
+        what made this test pass on one CI runner and fail on the other for the
+        same `python-version: '3.11'`. The unwrapped address is spelled one way
+        by every Python, which is the reason it is the thing worth naming.
+        """
         with Network(names={"wrapped.test": ["::ffff:127.0.0.1"]}):
             with self.assertRaises(security.Forbidden) as caught:
                 security.check_url("http://wrapped.test/")
+        message = caught.exception.message
         self.assertEqual(caught.exception.code, "url_blocked")
-        self.assertIn("127.0.0.1", caught.exception.message)
+        self.assertIn("127.0.0.1", message)
+        self.assertIn("loopback", message)
+        self.assertNotIn("private", message)
+        # The one assertion that fails on every interpreter when the envelope
+        # is judged instead of opened. The three above do not: on a Python
+        # whose `is_loopback` unwraps, reading the envelope still yields the
+        # word "loopback", and the envelope's own spelling still contains
+        # "127.0.0.1", so all three pass while the guard is doing the wrong
+        # thing. Saying which address was found inside which is the only claim
+        # here that only the unwrapping can satisfy.
+        self.assertIn("wrapped inside", message)
 
     def test_one_private_answer_among_several_refuses_the_whole_name(self):
         # A name with a public A record and a loopback A record is not half
