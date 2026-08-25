@@ -61,12 +61,20 @@ jobs:
       # that answer is worth twenty seconds rather than a full Typst build.
       #
       # `enablement: true` asks the API to switch it on using the `pages: write`
-      # token above, which is the whole fix in the ordinary case. The call can
-      # still be refused — a private repository on a plan without Pages, or a
-      # token whose scope was narrowed — and when it is, the action's own
-      # message is `HttpError: Not Found`, which names neither the cause nor the
-      # cure. So the failure is tolerated here and read in the next step, which
-      # is the one that ends the job.
+      # token above. Measured on 2026-08-25, on this repository, that is not
+      # enough: the create call comes back `Resource not accessible by
+      # integration`, because creating a Pages site needs `Administration:
+      # write` and the workflow's GITHUB_TOKEN is never granted it — no
+      # `permissions:` block can ask for what the token cannot hold. The ask is
+      # kept because it costs half a second, it is the correct one, and it
+      # succeeds wherever the token does carry it; once Pages is on, this step
+      # simply reads the site and the guard below never fires.
+      #
+      # So the first enablement is a thing a human does once, and the only
+      # useful thing a workflow can do about it is say so precisely. The
+      # action's own verdict is `HttpError: Not Found`, which names neither the
+      # cause nor the cure, so its failure is tolerated here and read in the
+      # next step, which is the one that ends the job.
       - name: Enable and configure Pages
         id: pages
         continue-on-error: true
@@ -78,12 +86,15 @@ jobs:
         if: steps.pages.outcome != 'success'
         shell: bash
         run: |
-          echo "::error::GitHub Pages is not enabled for ${GITHUB_REPOSITORY} and this" \
-               "workflow could not enable it. Open" \
+          echo "::error::GitHub Pages has never been switched on for" \
+               "${GITHUB_REPOSITORY}, and no workflow can switch it on for you:" \
+               "creating the site needs Administration:write, which GITHUB_TOKEN" \
+               "is never granted. A person has to do it once. Open" \
                "https://github.com/${GITHUB_REPOSITORY}/settings/pages," \
-               "set 'Build and deployment' → Source to 'GitHub Actions', and re-run." \
-               "If that page offers no such option the repository is private on a plan" \
-               "without Pages: make it public, or upgrade the account."
+               "set 'Build and deployment' → Source to 'GitHub Actions', then" \
+               "re-run this workflow. Every run after that is automatic." \
+               "If that page offers no such option the repository is private on a" \
+               "plan without Pages: make it public, or upgrade the account."
           exit 1
 
       - uses: actions/setup-python@v5

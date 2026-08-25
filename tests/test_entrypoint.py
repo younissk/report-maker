@@ -96,13 +96,64 @@ class OldInterpreter(unittest.TestCase):
     @NEEDS_OLD
     def test_a_real_command_works_and_not_just_version(self) -> None:
         """`--version` exits before the vault machinery. `doctor` does not, so it
-        is the one that proves the engine actually imported."""
+        is the one that proves the engine actually imported.
+
+        What proves it is `doctor`'s *output*, and not its exit code. The two
+        answer different questions. The vault and reports lines are printed by
+        code that cannot run at all unless `tomllib` imported and the config
+        loaded, which is the whole subject of this module. The exit code is
+        `0 if typst else 1` — a statement about the machine's toolchain, and
+        specifically about whether typst happens to sit in one of the six
+        directories `FINDER_PATH` names.
+
+        This test used to assert the exit code, and so asserted the second thing
+        while describing the first. It passed on a developer's Mac, where typst
+        is in `/opt/homebrew/bin` and therefore on that PATH, and failed on a CI
+        Mac, where the workflow installs typst to `~/.local/bin` and it is not.
+        Nobody had run it on a machine that keeps typst anywhere else, so an
+        assertion that looked strict was quietly a claim about where one
+        machine happens to keep a binary.
+        The irony is exact: `FINDER_PATH` is impoverished on purpose, to
+        reproduce a launch from Finder, and the assertion then required that
+        impoverished PATH to be rich enough to contain a build tool.
+
+        The exit code is still checked, and now more tightly than before: it is
+        held against what `doctor` itself reported on the line above it. That is
+        an invariant on every machine rather than on some of them, and it would
+        still catch a `doctor` that printed one answer and returned the other.
+        """
         assert OLD is not None
         result = self.run_script(
             OLD, "-C", str(ROOT / "examples" / "demo-vault"), "doctor"
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("vault", result.stdout)
+        both = result.stdout + result.stderr
+
+        # The failure this module exists for, in the two shapes it arrives in.
+        self.assertNotIn("ModuleNotFoundError", both)
+        self.assertNotIn("Traceback", result.stderr)
+
+        # Printed before `doctor` looks at the toolchain at all, so reaching
+        # them means the re-executed interpreter imported the engine and read a
+        # real vault — which is the claim in this test's name.
+        self.assertIn("demo-vault", result.stdout)
+        self.assertRegex(result.stdout, r"reports\s+\d+ in ")
+
+        typst_line = next(
+            (
+                line
+                for line in result.stdout.splitlines()
+                if line.strip().startswith("typst")
+            ),
+            "",
+        )
+        self.assertTrue(typst_line, f"doctor printed no typst line\n{both}")
+        found = "MISSING" not in typst_line
+        self.assertEqual(
+            result.returncode,
+            0 if found else 1,
+            f"doctor reported typst as {'found' if found else 'missing'} and "
+            f"then exited {result.returncode}\n{both}",
+        )
 
     def test_the_current_interpreter_is_not_re_executed(self) -> None:
         """This test suite already runs on 3.11+; the guard must be a no-op there
