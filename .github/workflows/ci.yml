@@ -1,0 +1,304 @@
+# The gate.
+#
+# Three things run here, and one of them is the reason the file exists.
+#
+#   suite      the engine's tests, the web server's tests, and the demo vault
+#              built end to end — on Linux and on macOS, because the engine
+#              looks for fonts and applications in places only one of them has.
+#   frontends  the desktop app and the web client typechecked and bundled.
+#   link-rot   weekly, not per-push: re-fetch every page the demo vault cites
+#              and fail when one is gone. See the job for why that is the point.
+#
+# `push` is narrowed to `main` on purpose: a branch gets its run through its pull
+# request, and running both events on every branch doubles the bill for one
+# answer. Push a branch with no PR and reach for `workflow_dispatch`.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Monday, 06:00 UTC — the link-rot job, and nothing else.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # `event_name` is in the key so a push to main cannot cancel the weekly
+  # link-rot run, which is the one job here that nothing else repeats.
+  group: ci-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned, because a document is a rendering and not a value: two Typst
+  # releases can paginate or hyphenate differently, and `tests/test_render.py`
+  # grades a perceptual hash of page 1. This pin is also in pages.yml; the two
+  # have to move together.
+  TYPST_VERSION: '0.15.1'
+  # The declared floor in README.md ("Python 3.11+"). Testing the floor is the
+  # only version test worth having when there are no dependencies to conflict.
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  suite:
+    name: suite (${{ matrix.os }})
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Straight from the release, rather than through a third-party action:
+      # the pin is then visible in this file and there is no second supply
+      # chain to trust for the one binary the whole build depends on.
+      - name: Install Typst ${{ env.TYPST_VERSION }}
+        shell: bash
+        run: |
+          case "${RUNNER_OS}-${RUNNER_ARCH}" in
+            Linux-X64)    asset=typst-x86_64-unknown-linux-musl ;;
+            Linux-ARM64)  asset=typst-aarch64-unknown-linux-musl ;;
+            macOS-ARM64)  asset=typst-aarch64-apple-darwin ;;
+            macOS-X64)    asset=typst-x86_64-apple-darwin ;;
+            *) echo "::error::no Typst build for ${RUNNER_OS}-${RUNNER_ARCH}"; exit 1 ;;
+          esac
+          url="https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${asset}.tar.xz"
+          curl -fsSL --retry 3 --retry-delay 2 "$url" -o typst.tar.xz
+          tar -xf typst.tar.xz
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 "${asset}/typst" "$HOME/.local/bin/typst"
+          rm -rf typst.tar.xz "${asset}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Confirm the toolchain
+        run: |
+          typst --version
+          python3 --version
+          ./bin/report-maker --version
+          ./bin/report-maker -C examples/demo-vault doctor
+
+      # `report-maker all` renders diagrams as its second step, and the engine
+      # installs mermaid-cli on demand into the vault's .build/ — 190 packages
+      # on a cold run. The key is the file the version is pinned in, so a bump
+      # invalidates it and nothing else does. A miss is slow, never wrong: the
+      # engine reinstalls, and a failure to render is caught and skipped.
+      - name: Cache mermaid-cli
+        uses: actions/cache@v4
+        with:
+          path: examples/demo-vault/.build/mermaid
+          key: mermaid-${{ runner.os }}-${{ hashFiles('engine/config.py', 'examples/demo-vault/report-maker.toml') }}
+
+      # NOTE, measured on 2026-08-25 and not yet fixed: this step is expected to
+      # fail on ubuntu-latest, in tests/test_render.py, and the cause is fonts
+      # rather than code. The demo vault's brand pack asks for Didot, Helvetica
+      # Neue and Menlo — macOS system faces with no Linux equivalent — so Typst
+      # substitutes and the layout moves. Rendering the demo vault with
+      # `--ignore-system-fonts` puts `examples/2026-08-16-brief-example` 13 bits
+      # from its golden hash against a tolerance of 6 (the other report moves 2
+      # and passes). Two honest fixes, neither of them in this file: record the
+      # golden hashes per platform, or move the demo vault's brand pack onto
+      # faces Typst embeds. Do not reach for a skip — see CLAUDE.md, "Do not
+      # weaken a rule to pass a build."
+      - name: Engine tests
+        run: make test
+
+      - name: Web tests
+        run: python3 -m unittest discover -s web/tests
+
+      # The end-to-end proof: stage, diagrams, build, pages, manifest, check.
+      # `check` is last and non-zero on any finding, so this is the citation
+      # rule enforced against a real vault rather than against a fixture.
+      - name: Build the demo vault
+        shell: bash
+        run: |
+          set +e
+          ./bin/report-maker -C examples/demo-vault all
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo "::error::report-maker all exited $code on examples/demo-vault"
+            exit "$code"
+          fi
+          echo "report-maker all exited 0"
+
+      # test_render tells you to go and look at the page. This is how you can.
+      - name: Keep the rendered pages when something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-pages-${{ matrix.os }}
+          path: |
+            examples/demo-vault/.build/golden-pages/**
+            examples/demo-vault/out/pages/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  frontends:
+    name: app + web client
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            web/client/package-lock.json
+
+      # `electron-vite build` typechecks and bundles; it never launches
+      # Electron, so the ~100 MB binary download buys nothing here. Drop this
+      # line if a build ever turns out to need it.
+      - name: Desktop app — typecheck and bundle
+        working-directory: app
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm run build
+
+      - name: Web client — typecheck and bundle
+        working-directory: web/client
+        run: |
+          npm ci
+          npm run build
+
+  link-rot:
+    name: link rot
+    # Weekly and on demand, never per-push: this job makes a real request for
+    # every archived source, and doing that on every commit is both slow and
+    # rude to the sites being cited.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # No Typst: nothing is compiled here. `verify` re-fetches the pages the
+      # vault cites and compares them against what was archived.
+      - name: Re-fetch every archived source
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          ./bin/report-maker -C examples/demo-vault verify --json > verify.json
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          cat verify.json
+
+      - name: Read the drift
+        id: drift
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, pathlib
+
+          data = json.loads(pathlib.Path("verify.json").read_text(encoding="utf-8"))
+          counts = data.get("counts", {})
+          drifts = data.get("drifts", [])
+
+          # Every state the engine defines, worst first — the same order
+          # `verify` prints them in.
+          states = ("gone", "error", "changed", "unsnapshotted", "offline", "ok")
+          for state in states:
+              print(f"{state}={counts.get(state, 0)}")
+
+          archived = sum(counts.get(s, 0) for s in ("gone", "error", "changed", "ok"))
+          print(f"archived={archived}")
+
+          # A detail carries a URL and whatever the far end said, so the one
+          # character that would break the table out of its own column is
+          # escaped before it gets there.
+          def cell(value):
+              return str(value).replace("|", "\\|")
+
+          rows = "\n".join(
+              f"| `{cell(d['state'])}` | {cell(d['report'])} "
+              f"| `@{cell(d['key'])}` | {cell(d['detail'])} |"
+              for d in sorted(drifts, key=lambda d: states.index(d["state"]))
+          )
+          summary = [
+              "## Link rot — `report-maker verify` over `examples/demo-vault`",
+              "",
+              "A page *changing* is not a failure: the snapshot is still evidence and",
+              "the report is still defensible because of it. A page that is **gone**",
+              "is the failure, and it is the one this job exists to catch.",
+              "",
+              "| state | report | key | detail |",
+              "|---|---|---|---|",
+              rows or "| — | — | — | nothing archived |",
+          ]
+          if archived == 0:
+              summary += [
+                  "",
+                  "> **This gate cannot fail yet.** No source in the demo vault has a",
+                  "> snapshot, so there is nothing to re-fetch and `verify` returns 0",
+                  "> whatever the web does. Run `report-maker cite` on the vault's",
+                  "> sources to give this job something to watch.",
+              ]
+          pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
+              "\n".join(summary) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: No source is archived
+        if: steps.drift.outputs.archived == '0'
+        run: |
+          echo "::warning::examples/demo-vault has no archived snapshots, so this job" \
+               "cannot detect link rot. Run report-maker cite on its sources."
+
+      # A page moved. The archive still holds the bytes the report rests on, so
+      # this step goes red and the job stays green — `continue-on-error` is the
+      # workflow's spelling of the engine's own exit-code rule: only `gone`
+      # fails the command.
+      - name: A cited page has changed
+        continue-on-error: true
+        env:
+          CHANGED: ${{ steps.drift.outputs.changed }}
+          ERRORED: ${{ steps.drift.outputs.error }}
+        shell: bash
+        run: |
+          if [ "$CHANGED" != "0" ] || [ "$ERRORED" != "0" ]; then
+            echo "::warning::$CHANGED cited page(s) have changed and $ERRORED could not be fetched." \
+                 "Re-read the claims that rest on them; re-archive with report-maker verify --refresh."
+            exit 1
+          fi
+          echo "every archived page is byte-identical to the day it was cited"
+
+      # A page is gone. This is the whole point of having archived it, and the
+      # whole point of this file: a citation that resolves to a dead link
+      # proves nothing, and nothing else in the build would ever say so.
+      - name: A cited page is gone
+        env:
+          GONE: ${{ steps.drift.outputs.gone }}
+          CODE: ${{ steps.verify.outputs.code }}
+        shell: bash
+        run: |
+          if [ "$GONE" != "0" ]; then
+            echo "::error::$GONE cited page(s) are gone — 404 or 410." \
+                 "The snapshot in the report folder is now the only copy that exists."
+            exit 1
+          fi
+          if [ "$CODE" != "0" ]; then
+            echo "::error::report-maker verify exited $CODE"
+            exit 1
+          fi
+          echo "no dead links"

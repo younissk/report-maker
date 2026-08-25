@@ -1,0 +1,405 @@
+@import 'tailwindcss';
+
+/* The same tokens the desktop app uses, carried across verbatim so web and
+   desktop read as one product. The palette is deliberately near-neutral: the
+   thing being looked at is a report, and a chrome with opinions of its own would
+   compete with the document's own brand.
+
+   Two things differ from `app/src/renderer/src/styles.css`, and only two:
+
+   1. Dark follows `prefers-color-scheme` here, because a browser has no
+      settings screen of ours to read. `data-theme="dark"` / `data-theme="light"`
+      on <html> overrides it in both directions.
+   2. The root font size is the browser's, not 13px. A phone that has been told
+      to render at 20px must be allowed to. Density comes from spacing instead.
+*/
+
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(html:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+  &:where(html[data-theme='dark'] *) {
+    @slot;
+  }
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+
+  /* The citation rule, as four colours. Cited, assessed, unmarked — and the
+     neutral that means "this line says nothing either way". Restrained on
+     purpose: the point is to tell three classes apart, not to decorate. */
+  --rail-cited: oklch(0.55 0.11 220);
+  --rail-assessed: oklch(0.62 0.09 85);
+  --rail-unmarked: oklch(0.62 0.2 25);
+  --rail-neutral: var(--border);
+
+  /* Layout constants the shell and every pane share. Declared here so a pane
+     can reserve room for the bar without importing anything from the shell. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --topbar-h: 3.25rem; /* 52px */
+  --tabbar-h: 3.5rem; /* 56px, before the safe-area inset is added */
+  --tap: 2.75rem; /* 44px — the floor for anything a thumb has to hit */
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) {
+    --background: oklch(0.141 0.005 285.823);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.18 0.006 285.885);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.18 0.006 285.885);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.985 0 0);
+    --primary-foreground: oklch(0.21 0.006 285.885);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.274 0.006 286.033);
+    --muted-foreground: oklch(0.705 0.015 286.067);
+    --accent: oklch(0.274 0.006 286.033);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --destructive-foreground: oklch(0.985 0 0);
+    --border: oklch(1 0 0 / 12%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.552 0.016 285.938);
+
+    /* Lifted, not inverted: the same three hues have to survive on a dark
+       ground at 6px tall. */
+    --rail-cited: oklch(0.68 0.12 220);
+    --rail-assessed: oklch(0.75 0.11 85);
+    --rail-unmarked: oklch(0.7 0.19 25);
+    --rail-neutral: var(--border);
+  }
+}
+
+html[data-theme='dark'] {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.18 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.18 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+  --rail-cited: oklch(0.68 0.12 220);
+  --rail-assessed: oklch(0.75 0.11 85);
+  --rail-unmarked: oklch(0.7 0.19 25);
+  --rail-neutral: var(--border);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-rail-cited: var(--rail-cited);
+  --color-rail-assessed: var(--rail-assessed);
+  --color-rail-unmarked: var(--rail-unmarked);
+  --color-rail-neutral: var(--rail-neutral);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --font-mono: 'SF Mono', 'Menlo', ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    height: 100%;
+    /* iOS enlarges text in landscape unless told not to. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    height: 100%;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: ui-sans-serif, -apple-system, 'Helvetica Neue', sans-serif;
+    /* The hard guarantee: the document itself never scrolls, in either axis.
+       Every pane scrolls inside its own box, so wide content — a table, a page
+       image, a stack trace — can never drag the whole layout sideways. */
+    overflow: hidden;
+    overscroll-behavior: none;
+    /* Not `100vh`: mobile Safari's vh includes the retracted address bar and the
+       bottom of the app ends up under it. */
+    min-height: 100dvh;
+  }
+
+  #root {
+    height: 100%;
+    /* 100dvh alone leaves a phantom scroll on some Android browsers; pinning
+       both is what actually holds. */
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Kill the 300ms tap delay and double-tap-to-zoom on things that are meant to
+     be tapped. Text keeps its zoom. */
+  button,
+  [role='button'],
+  a,
+  input,
+  select,
+  textarea,
+  label {
+    touch-action: manipulation;
+  }
+
+  /* A tap on a control should not paint a grey box over the design. */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Focus is never removed, only quietened for pointer users — a keyboard user
+     on a desktop browser has no other way of knowing where they are. */
+  :focus-visible {
+    outline: none;
+  }
+}
+
+@layer utilities {
+  /* A scrolling pane. Vertical only, contained, and momentum-scrolling on iOS.
+     Panes use this instead of `overflow-auto` so the horizontal axis is shut off
+     in one place rather than in forty. */
+  .pane {
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
+  }
+
+  /* The one sanctioned way to let something be wider than the screen: it scrolls
+     inside its own box. Tables, page images, `stderr` from a failed build. */
+  .scroll-x {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+
+  /* Long unbroken user text — a URL in a source title, a report id — must wrap
+     rather than push the layout. */
+  .break-anywhere {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .safe-t {
+    padding-top: var(--safe-top);
+  }
+  .safe-b {
+    padding-bottom: var(--safe-bottom);
+  }
+  .safe-x {
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+  }
+
+  /* 44px, the floor for anything a thumb has to hit. */
+  .tap {
+    min-height: var(--tap);
+    min-width: var(--tap);
+  }
+
+  /* Three answers the citation rule gives, as painted surfaces. */
+  .rail-cited {
+    background-color: var(--rail-cited);
+  }
+  .rail-assessed {
+    background-color: var(--rail-assessed);
+  }
+  .rail-unmarked {
+    background-color: var(--rail-unmarked);
+  }
+  .rail-neutral {
+    background-color: var(--rail-neutral);
+  }
+}
+
+/* ── Overlays ────────────────────────────────────────────────────────────────
+   A dialog on a desktop and a sheet on a phone are the same component with two
+   sets of keyframes. Written by hand rather than pulled from an animation
+   package: it is nine rules, and a dependency for nine rules is a dependency to
+   keep updated for ever. */
+
+@keyframes rm-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes rm-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes rm-zoom-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+}
+@keyframes rm-zoom-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+}
+@keyframes rm-slide-up-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes rm-slide-up-out {
+  to {
+    transform: translateY(100%);
+  }
+}
+
+[data-slot='overlay'][data-state='open'] {
+  animation: rm-fade-in 160ms ease-out;
+}
+[data-slot='overlay'][data-state='closed'] {
+  animation: rm-fade-out 140ms ease-in;
+}
+[data-rm-surface='dialog'][data-state='open'] {
+  animation: rm-zoom-in 160ms ease-out;
+}
+[data-rm-surface='dialog'][data-state='closed'] {
+  animation: rm-zoom-out 140ms ease-in;
+}
+[data-rm-surface='sheet'][data-state='open'] {
+  animation: rm-slide-up-in 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+[data-rm-surface='sheet'][data-state='closed'] {
+  animation: rm-slide-up-out 180ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes rm-slide-right-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes rm-slide-right-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* A side panel arrives from the edge it is anchored to. It cannot borrow the
+   centred dialog's keyframes: those translate by -50% in both axes, so a
+   right-anchored panel flew in from the upper left before snapping to the
+   edge. */
+[data-rm-surface='sheet-right'][data-state='open'] {
+  animation: rm-slide-right-in 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+[data-rm-surface='sheet-right'][data-state='closed'] {
+  animation: rm-slide-right-out 180ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* The same overlay, sliding up from the thumb on a phone and settling in the
+   middle of a desktop. One component, two sets of keyframes, switched by the
+   media query rather than by JavaScript — so it is right on the first frame. */
+[data-rm-surface='responsive'][data-state='open'] {
+  animation: rm-slide-up-in 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+[data-rm-surface='responsive'][data-state='closed'] {
+  animation: rm-slide-up-out 180ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (min-width: 1024px) {
+  [data-rm-surface='responsive'][data-state='open'] {
+    animation: rm-zoom-in 160ms ease-out;
+  }
+  [data-rm-surface='responsive'][data-state='closed'] {
+    animation: rm-zoom-out 140ms ease-in;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── CodeMirror ──────────────────────────────────────────────────────────────
+   Two rules only, matching the app: the editor fills its pane, and it draws no
+   focus ring inside a pane that already has a border. Typography and colours
+   belong to whoever builds the editor pane. The font size floor is not
+   cosmetic — under 16px, iOS zooms the viewport the moment the caret lands. */
+.cm-editor {
+  height: 100%;
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-editor .cm-content,
+.cm-editor .cm-gutters {
+  font-size: 16px;
+}
+@media (min-width: 1024px) {
+  .cm-editor .cm-content,
+  .cm-editor .cm-gutters {
+    font-size: 13px;
+  }
+}

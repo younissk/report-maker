@@ -1,0 +1,56 @@
+# What reaches `docker build`.
+#
+# THIS is the file docker reads for the web image. `web/Dockerfile` is built
+# with the repository root as its context — the server is a front end over
+# `bin/report-maker`, so the engine has to be in the context — and docker takes
+# its ignore file from the context root, never from the Dockerfile's directory.
+# `web/.dockerignore` exists as a mirror for anyone who builds with `web/` as
+# the context; it has no effect on the build this repository ships.
+
+# Version control and editor litter.
+.git
+.gitignore
+.gitattributes
+.github
+.devcontainer
+**/.DS_Store
+**/*.swp
+
+# Generated. Every one of these is rebuilt from source, and shipping a stale
+# copy into an image is how a container ends up serving something no commit
+# describes.
+out/
+.build/
+**/out/
+**/.build/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/node_modules/
+**/*.tsbuildinfo
+web/client/dist/
+
+# The desktop app. Same engine, different front end; nothing in the server
+# reaches for it.
+app/
+
+# The demo vault. A session vault is seeded by `report-maker init` and
+# `report-maker new`, which read `engine/templates/` — not this folder.
+examples/
+
+# The engine suite. It is not run inside the runtime image; a contributor runs
+# `make test` in a checkout or in the devcontainer.
+tests/
+web/tests/
+
+# Deployment descriptors for other targets, and prose. None of it is code the
+# server runs.
+docker-compose.yml
+web/fly.toml
+web/render.yaml
+audits/
+
+# Prose. Nothing the image COPYs is markdown, and `**` is spelled out because a
+# bare `*.md` matches only the root — docker's patterns do not cross `/` on a
+# single star, which is the sort of detail that quietly ships a 37 KB README.
+**/*.md

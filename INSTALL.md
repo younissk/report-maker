@@ -106,6 +106,33 @@ identity check in each — it will refuse to delete something that is not ours) 
 the `~/.local/bin` symlink, if that symlink still points at this checkout. It
 leaves your vaults, your settings and the repository alone.
 
+## Running the web version instead
+
+The *server* installs nothing. It is one Python process with no dependencies —
+`web/` is standard library only, the same rule the engine follows — so nothing
+stands between a clone and a running API. Only the page it serves needs Node,
+and only to build it once:
+
+```bash
+make web            # the API on 127.0.0.1:8787, and the Vite dev server in front
+make web-build      # build the frontend once; `python3 -m web` then serves it
+make web-docker     # the container instead: docker compose up --build
+```
+
+`make install` is not involved and does not need to have been run. The server
+finds `bin/report-maker` in this checkout, so it is the same engine the CLI is,
+live — pull the repo and the server changes with it.
+
+At runtime it writes **nothing outside `RM_WEB_ROOT`**, which defaults to a
+per-run temp directory: session vaults and published shares live there, and a
+restart takes them with it. (`web/client/node_modules` and `web/client/dist` are
+build output, inside the repo, like the app's.) That default is right for a laptop and wrong for anything else,
+so set it before hosting this anywhere. Read the *Security posture* section of
+[README.md](README.md#the-web-version) first — a server that runs typst on
+source a stranger wrote is a different proposition from an app on your own
+machine, and binding anything but loopback prints a warning saying exactly what
+it opens.
+
 ## Building a real distributable
 
 `make install` is for this machine. When the artefact is for somebody else:

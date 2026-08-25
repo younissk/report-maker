@@ -1,0 +1,64 @@
+# What gets watched for updates, and what deliberately does not.
+#
+# There is no `pip` or `poetry` entry here, and that is not an omission. The
+# engine is Python 3.11+ and **standard library only** — there is no
+# requirements.txt, no pyproject dependency list and no lockfile, because
+# `web/` is stdlib too (`http.server.ThreadingHTTPServer`, so deployment is
+# `python3 -m web`). Nothing on the Python side has a version for Dependabot to
+# bump. If that ever stops being true, the dependency is the thing to argue
+# about, not this file.
+#
+# The two npm trees are the front ends, and neither holds any logic about a
+# vault: both shell out to `report-maker`. They are updated so that a security
+# advisory against a bundler or an editor package is not discovered by reading
+# the news.
+
+version: 2
+
+updates:
+  # The desktop app (Electron + React + CodeMirror).
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the routine floor-raising, so the queue stays readable and a
+      # genuine major bump stands out on its own.
+      app-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+    commit-message:
+      prefix: 'chore(app)'
+
+  # The web client (Vite + React 19 + Tailwind v4 + CodeMirror).
+  - package-ecosystem: npm
+    directory: /web/client
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 5
+    groups:
+      web-client-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+    commit-message:
+      prefix: 'chore(web)'
+
+  # The actions the workflows pin by major tag. Without this entry those pins
+  # go stale silently, which is the failure mode a pin is supposed to prevent.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: 'chore(ci)'

@@ -1,0 +1,144 @@
+# report-maker web, in one command.
+#
+#     docker compose up --build          then open http://127.0.0.1:8787
+#     docker compose down                stop it
+#     docker compose down -v             stop it and delete every session vault
+#
+# The port is published to **127.0.0.1 only**. A casual `docker compose up`
+# must not put this on the network: the server runs strangers' typst source,
+# fetches URLs of their choosing and publishes pages it will serve to anyone.
+# Quotas and an SSRF pre-flight are not the same thing as an authenticated
+# service — put something that knows who your users are in front of it before
+# it is reachable from the internet, and read `web/README.md` first.
+
+name: report-maker
+
+services:
+  web:
+    build:
+      # The repository root, not `web/`: the image carries the engine.
+      context: .
+      dockerfile: web/Dockerfile
+    image: report-maker-web:local
+
+    # host:container. The `127.0.0.1:` prefix is load-bearing — drop it and
+    # docker publishes on every interface and punches through the host
+    # firewall while it is at it. Only the host PORT is overridable, and only
+    # so this can run beside a `make web` dev server that already holds 8787:
+    #
+    #     RM_WEB_HOST_PORT=8788 docker compose up
+    #
+    # The interface is not overridable, on purpose. Publishing this to the
+    # network is a decision to take deliberately, in front of a reverse proxy
+    # that knows who your users are — not by editing a default.
+    ports:
+      - "127.0.0.1:${RM_WEB_HOST_PORT:-8787}:8787"
+
+    volumes:
+      # `RM_WEB_ROOT`. Without this, a `docker compose up` after a rebuild
+      # loses every open session and — worse — every share link that was ever
+      # handed out. A share is meant to still open after you closed the tab.
+      - sessions:/var/lib/report-maker
+
+    environment:
+      # ── the bind ────────────────────────────────────────────────────────
+      # The container listens on 0.0.0.0 because loopback inside a container
+      # is reachable by nobody. Where that port goes is decided by `ports:`
+      # above, which is the only place the decision belongs.
+      RM_WEB_PORT: "8787"
+
+      # ── the store ───────────────────────────────────────────────────────
+      # Where `sessions/<id>/vault/` and `shares/<token>.html` live. Set in
+      # the image already; repeated here because it is the one variable you
+      # must not leave to a default in production — the default is a per-run
+      # temp dir, which is right for a laptop and wrong for anything that
+      # restarts.
+      #
+      # Long and project-specific rather than `/data`, and that is load-bearing:
+      # the server strips this prefix out of every JSON string on the way out,
+      # file text included, so a short root corrupts reports that mention it.
+      # `/data` turned a report's own `/.build/design/base/data.typ` into
+      # `….typ`. See the block in `web/Dockerfile` that measures it.
+      RM_WEB_ROOT: /var/lib/report-maker
+
+      # The built frontend. Without one the API still answers; you just have
+      # no page. Set in the image; shown here so the wiring is visible.
+      RM_WEB_CLIENT: /opt/report-maker/web/client/dist
+
+      # ── cookies and TLS ─────────────────────────────────────────────────
+      # SECURITY: `1` adds `Secure` to the session cookie, so the browser will
+      # only ever send it over HTTPS. Leave it `0` for this loopback setup —
+      # there is no TLS here, and a `Secure` cookie over plain http is a
+      # cookie the browser silently drops, which reads as "sessions are
+      # broken". Set it to `1` the moment anything terminates TLS in front.
+      RM_WEB_SECURE_COOKIE: "0"
+
+      # ── diagrams ────────────────────────────────────────────────────────
+      # SECURITY: `1` allows `report-maker diagrams`, which drives mermaid,
+      # which drives a headless Chrome once per diagram — the largest attack
+      # surface in the tool and a trivial denial of service. Unset (the
+      # default) the server strips node from every engine subprocess PATH,
+      # AND the runtime image has no node in it at all, so this variable
+      # alone will not turn diagrams on. Both halves are deliberate.
+      # RM_WEB_DIAGRAMS: "1"
+
+      # ── shares ──────────────────────────────────────────────────────────
+      # How long a published share link lives, in hours. 720 is thirty days.
+      # `0` keeps them for ever, and then the disk is your problem: shares are
+      # immutable by design, so nothing overwrites one and deleting the file
+      # is the only way to revoke a link.
+      RM_WEB_SHARE_TTL_HOURS: "720"
+
+      # ── GitHub mode ─────────────────────────────────────────────────────
+      # SECURITY: these are secrets. Leave them unset and GitHub mode is
+      # simply OFF — the UI says so plainly rather than showing a dead
+      # button, and try mode (the default experience) is unaffected. Nothing
+      # here ever reaches the browser: a token lives in the server-side
+      # session record only.
+      #
+      # Prefer a `.env` file beside this one over literals here, so a secret
+      # is not committed alongside the thing that reads it.
+      #
+      # RM_WEB_GITHUB_CLIENT_ID: "${RM_WEB_GITHUB_CLIENT_ID}"
+      # RM_WEB_GITHUB_CLIENT_SECRET: "${RM_WEB_GITHUB_CLIENT_SECRET}"
+      # RM_WEB_GITHUB_CALLBACK: "http://127.0.0.1:8787/api/github/callback"
+      #
+      # A single-user, self-hosted alternative to the OAuth app: one personal
+      # access token, server side, never a field in the UI. Use this OR the
+      # three above, not both.
+      # RM_WEB_GITHUB_TOKEN: "${RM_WEB_GITHUB_TOKEN}"
+
+      # ── git identity, for GitHub mode ───────────────────────────────────
+      # `report-maker sync` runs `git commit`, and git refuses to commit
+      # without an identity. The container has none. Set these and every
+      # commit the server makes is attributed to them — which is why they are
+      # commented out rather than given a plausible-looking default: a commit
+      # signed "report-maker" that a person did not write is a false statement
+      # in the one place this project treats as a record. See the note in the
+      # handover about pushing this down into the server, where the OAuth
+      # user's real identity is already known.
+      # GIT_AUTHOR_NAME: "Your Name"
+      # GIT_AUTHOR_EMAIL: "you@example.com"
+      # GIT_COMMITTER_NAME: "Your Name"
+      # GIT_COMMITTER_EMAIL: "you@example.com"
+
+    # The image's own HEALTHCHECK hits /api/health; compose inherits it. A 200
+    # there means the engine was found, and it never answers with a path.
+
+    restart: unless-stopped
+
+    # A process that can never gain privileges it did not start with. The
+    # server already runs as uid 10001; this closes the setuid route.
+    security_opt:
+      - no-new-privileges:true
+
+    # typst holds a rendered document in memory and the server runs source it
+    # did not write. A limit turns "somebody built a 900-page report" into a
+    # failed build rather than a dead host. Raise it if legitimate reports
+    # start failing — the 60-second per-command deadline is the other half of
+    # this and is enforced in the server, not here.
+    mem_limit: 1g
+    pids_limit: 512
+
+volumes:
+  sessions:

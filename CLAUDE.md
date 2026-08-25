@@ -1,16 +1,26 @@
 # report-maker — repository instructions
 
-A headless report engine over a folder-based vault, plus an Electron app. Reports
-are Typst, built by `engine/`, which is pure Python and has no third-party
-dependencies. See [README.md](README.md) for the commands and
-[engine/README.md](engine/README.md) for the internals.
+A headless report engine over a folder-based vault, plus two front ends over it:
+an Electron app and a web version. Reports are Typst, built by `engine/`, which
+is pure Python and has no third-party dependencies. See [README.md](README.md)
+for the commands, [engine/README.md](engine/README.md) for the internals, and
+[web/README.md](web/README.md) for the server.
+
+```
+engine/               the engine — Python, standard library only
+bin/report-maker      the CLI entry point
+app/                  the desktop app (Electron)
+web/                  the web version (stdlib HTTP server + React client)
+examples/demo-vault/  a sample vault, for development and the app's smoke test
+tests/                engine unit tests            web/tests/ is the web suite
+```
 
 **This repository is the tool, not a vault.** A vault is any folder holding
 `report-maker.toml`, anywhere on the user's disk; the repo holds the engine, the
-app, and `examples/demo-vault/` — a sample vault for development and for the
-app's smoke test. Never scaffold a vault at the repository root, and never add
-report content outside `examples/demo-vault/`. Commands take the vault with `-C`:
-`report-maker -C examples/demo-vault all`, or `make <target> V=<vault>`.
+two front ends, and `examples/demo-vault/` — a sample vault for development and
+for the app's smoke test. Never scaffold a vault at the repository root, and
+never add report content outside `examples/demo-vault/`. Commands take the vault
+with `-C`: `report-maker -C examples/demo-vault all`, or `make <target> V=<vault>`.
 
 Folders are the data model, and there is no index to keep in sync:
 
@@ -138,8 +148,16 @@ make check V=<vault>                           # the citation rule alone (SCORE=
 make build V=<vault> KEEP=1                    # build the rest of the vault past a broken report
 make test                                      # engine unit tests
 make app                                       # the desktop app
+make web                                       # the web version: API + Vite dev server
+make web-build                                 # build the frontend the API serves
+make web-docker                                # the container, via docker compose
+make web-test                                  # the web server's own suite
 make install                                   # CLI on PATH, app in /Applications (see INSTALL.md)
 ```
+
+The web suite is a second `unittest` discovery root, not a second runner:
+`python3 -m unittest discover -s web/tests`. There is no pytest anywhere in this
+repository, and `web/` is standard library only for the same reason `engine/` is.
 
 The evidence commands, and the ones that read a vault back:
 
@@ -172,18 +190,32 @@ the app needs it.
 holding the CLI — `$(RM) doctor` silently expands to `rm -f doctor`. The Makefile
 uses `CLI` and `VAULT`.
 
-The desktop shell in `app/` (`make app`) is a front end over these same commands
-— it shells out to the CLI for everything and stores nothing but the list of
-vaults you have opened. Never move logic into it; add it to `engine/` and let the
-app call it.
+## The front ends hold no logic
 
-The engine has no preview server, by design — every command is headless and ends
-by writing a file. To read a built report, open `out/<report-id>.pdf`, or look at
-the page PNGs in `out/pages/<report-id>/`, which is also how an agent or an
-embedded browser that cannot render a PDF should read it. `report-maker html`
-writes `out/<report-id>.html` — the same pages plus the evidence behind every
-claim, in one self-contained file — but it writes it and stops: nothing serves
-it, and no command in the engine ever launches a browser.
+`app/` (`make app`) and `web/` (`make web`) are front ends over these same
+commands. Each shells out to the CLI for everything; the app stores nothing but
+the list of vaults you have opened, and the server stores nothing but a session
+record and a vault per session. **Never move logic into either one — add it to
+`engine/` and let them call it.** That sentence is the whole of it: two front
+ends over one engine can never disagree with the CLI or with each other, and the
+moment one of them parses a report or evaluates the citation rule itself, there
+are two implementations of the rule and one of them is wrong.
+
+Where a front end needs something the engine cannot do, that is a change to
+`engine/`, tested in `tests/`, and then a call. Not a workaround in the front
+end. The web version writes what it could not close into `web/README.md`'s *What
+is not closed* rather than patching around it — that section is a list of
+engine-side work, not a list of excuses.
+
+**The engine still has no preview server**, and `web/` is not one. Every engine
+command is headless and ends by writing a file; the server serves files the
+engine already wrote. To read a built report, open `out/<report-id>.pdf`, or look
+at the page PNGs in `out/pages/<report-id>/`, which is also how an agent, a
+phone, or an embedded browser that cannot render a PDF should read it.
+`report-maker html` writes `out/<report-id>.html` — the same pages plus the
+evidence behind every claim, in one self-contained file — but it writes it and
+stops. No command in the engine ever launches a browser, and none may start
+doing so because a front end would find it convenient.
 
 An agent driving a vault should reach for `report-maker mcp` rather than shelling
 out command by command. It exposes the vault over stdio JSON-RPC, and its

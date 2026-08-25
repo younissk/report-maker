@@ -58,6 +58,17 @@ substantive claim is footnoted with a bare link anyway, because the footnote was
 the shorter path at the moment of writing. Nobody chooses that, which is why it
 has to be an error rather than a paragraph of documentation.
 
+**E015 — a symlink out of the vault.** The three rules above are about what a
+report *says*. This one is about what a report *carries*. Typst's sandbox is
+`--root`, which is always the vault, and it will not compile `read("../../etc/
+passwd")` — but a symlink named `leakdir` pointing at `/etc` is not a `..`, and
+`read("/leakdir/passwd")` compiles and typesets the file into the PDF. The
+sandbox holds only while no link inside a report folder points out of the vault,
+so that has to be a checked property rather than an assumption. A link pointing
+*within* the vault is not a finding: sharing one diagram between two reports is a
+legitimate thing to do, and typst could read the target through its real path
+anyway.
+
 **`status:` and the final gate.** The two above make the linter stricter, and a
 stricter linter that cannot be told "I know, I am not finished" is a linter
 people run with `--warn-only`. So a report may declare `status:`, and while it
@@ -70,6 +81,7 @@ suppresses anything in a report that calls itself final.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
@@ -168,11 +180,20 @@ def relative(path: Path, root: Path) -> str:
     A finding about a file outside the vault should not be possible, but a
     reporter that raises instead of printing would turn a surprise into a
     crash, so an outsider keeps its absolute path.
+
+    The lexical fallback exists for exactly one caller: an E015 finding is
+    *about* a symlink, so resolving it lands on the target — outside the vault,
+    by definition of the rule — and the finding about a file sitting in
+    `reports/…` would print with an absolute path. The file is in the vault; only
+    what it points at is not. Nothing else can reach this branch, because
+    anything whose real path is inside the root is answered above.
     """
-    try:
-        return path.resolve().relative_to(root.resolve()).as_posix()
-    except ValueError:
-        return path.as_posix()
+    for candidate in (path.resolve(), path):
+        try:
+            return candidate.relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+    return path.as_posix()
 
 
 # ── source scrubbing ─────────────────────────────────────────────────────────
@@ -715,6 +736,135 @@ def _data_findings(report: Report, src: str) -> list[Finding]:
     ]
 
 
+# ── links out of the vault (E015) ─────────────────────────────────────────────
+#
+# Every other rule in this file reads a report's source. This one reads its
+# *folder*, because the thing it is looking for is not written anywhere in the
+# prose.
+#
+# Typst is the sandbox the whole build relies on: it cannot reach the network or
+# the shell, and it reads only under `--root`, which `build.py` and `pages.py`
+# always set to the vault. It refuses `read("../../etc/passwd")` and
+# `read("/../etc/passwd")` with "would escape the project root" — probed, not
+# read off the source. What it does not refuse is a symlink. A link named
+# `leakdir` inside a report folder, pointing at `/etc`, makes
+# `#raw(read("/leakdir/passwd"))` compile, and the file lands in the PDF.
+#
+# Nothing in this engine creates such a link, and the callers that could have
+# each shut the door their own way — the web layer refuses to resolve a request
+# path through a link, and its `git` invocations carry `core.symlinks=false`.
+# That is three separate promises holding one property, and a property held by
+# three promises is held by none of them. This makes it one checked fact.
+#
+# **Error, not warning.** Every other error here is about the report's argument
+# being wrong, and the person who suffers is the reader, who can see the report
+# and judge it. This one is about a file the author never chose to publish
+# appearing in a document they are about to send someone — a `.env`, an SSH key,
+# `/etc/passwd`. The reader cannot detect it, the author may not have written the
+# link, and a warning does not fail a build, which means the PDF ships. There is
+# also no legitimate report that needs one: a link within the vault is allowed,
+# and anything outside it belongs inside the folder, since the folder is the unit
+# that gets zipped and handed over and a link would arrive dead anyway.
+#
+# **What is deliberately not a finding:** a link that stays inside the vault.
+# Sharing a diagram or a CSV between two reports by symlink is a reasonable thing
+# to do, and typst can read the target through its real path regardless, so
+# refusing it would buy nothing and cost somebody a working vault.
+#
+# **Judged by where it points, not by whether the target exists.** A dangling
+# link out of the vault is one `mkdir` away from being a live one, and the report
+# folder travels — the link that resolves to nothing here resolves to something
+# on the machine it is opened on. So `/etc/nonexistent` is a finding and a
+# dangling link to a sibling report is not.
+#
+# **A detector, not the control.** `check` runs after `build` in `all`, and a
+# hostile author can reach for `status: "draft"`. This rule does not stop a
+# writer determined to read their own server's disk; the controls that do are the
+# ones at the doors where a link could be created, and they stay. What it does
+# catch is the case where the author is the victim: a vault cloned, a report
+# folder unzipped, a repository handed over. That folder's `status:` field was
+# written by whoever sent it, which is why E015 is the one code `draft` does not
+# soften — see `_gate`.
+
+
+#: Codes a `draft` declaration does not downgrade. Everything else in this file
+#: is the writer saying "I know, about my own argument", and they are the one who
+#: fixes it. E015 is a property of a folder that travels between people, so the
+#: `status:` beside it is not necessarily the word of the person now reading it.
+UNDOWNGRADABLE = frozenset({"E015"})
+
+
+def _outside(target: Path, root: Path) -> bool:
+    """Whether `target` sits outside `root`, both already resolved.
+
+    Compared by path components rather than by string prefix, so a vault at
+    `…/vault` does not silently contain `…/vault-evil`.
+    """
+    return not (target == root or root in target.parents)
+
+
+def _symlink_findings(report: Report, root: Path) -> list[Finding]:
+    """E015 — every symlink in the report folder whose target leaves the vault.
+
+    `os.walk` does not follow links (`followlinks=False` is its default and is
+    passed here anyway, because this is the one call site where the default is
+    load-bearing). A link to a directory therefore arrives in `dirnames` and is
+    reported without being descended into — which is both what the rule wants and
+    what stops a link to `/` from walking the disk.
+    """
+    out: list[Finding] = []
+    try:
+        root = root.resolve()
+    except OSError:  # pragma: no cover — an unreadable vault root
+        return out
+
+    for parent, dirnames, filenames in os.walk(report.folder, followlinks=False):
+        base = Path(parent)
+        for name in sorted(dirnames) + sorted(filenames):
+            link = base / name
+            if not link.is_symlink():
+                continue
+            here = relative(link, root)  # for the read() the message shows
+            try:
+                target = link.resolve()
+            except OSError as exc:
+                # A link this process cannot resolve — a loop, or a path too
+                # long. Reported rather than skipped: the rule's claim is that
+                # every link is inside the vault, and one that cannot be resolved
+                # is one that has not been shown to be.
+                out.append(
+                    Finding(
+                        "error",
+                        "E015",
+                        link,
+                        1,
+                        "a symlink whose target cannot be resolved "
+                        f"({exc.strerror or exc}) — a link that cannot be shown "
+                        "to stay inside the vault. Delete it, or replace it with "
+                        "a copy of what it pointed at",
+                        report.id,
+                    )
+                )
+                continue
+            if not _outside(target, root):
+                continue
+            out.append(
+                Finding(
+                    "error",
+                    "E015",
+                    link,
+                    1,
+                    f"a symlink to {target}, outside the vault. typst "
+                    f'follows it, so read("/{here}{"/…" if link.is_dir() else ""}") '
+                    "compiles and typesets that "
+                    "file into the PDF — a file nobody chose to publish. Delete "
+                    "the link, or copy what you need into the report folder",
+                    report.id,
+                )
+            )
+    return out
+
+
 # ── rules ────────────────────────────────────────────────────────────────────
 
 
@@ -857,6 +1007,10 @@ def check_report(cfg: Config, report: Report) -> list[Finding]:
 
     out += depth.family_findings(report)
 
+    # E015 — the report folder's own links. Not a rule about the source, so it
+    # is asked of the folder rather than of `src`.
+    out += _symlink_findings(report, cfg.root)
+
     # W011 — a status nobody recognises. It is treated as unstated, which is the
     # safe direction: a typo must never hand a report the leniency of `draft`.
     # (W007–W009 are data.py's column rules and W010 is score.py's; the warning
@@ -891,11 +1045,19 @@ def _gate(
     ever downgraded here — a `final` report keeps every error it has.
 
     Anything else, including no status at all, behaves exactly as it always did.
+
+    One code is outside all of it. `draft` is a *writer* saying "I know" about
+    their own unfinished argument, and every rule it softens is one that writer
+    is the right person to fix. E015 is not about the argument — it is a property
+    of a folder that gets zipped and handed over, so the `status:` line sitting
+    beside it may have been written by somebody else entirely. A rule a stranger
+    can switch off by putting one word in the file it travels with is not a rule.
+    See `UNDOWNGRADABLE`.
     """
     if status == "draft":
         return [
             f
-            if f.level != "error"
+            if f.level != "error" or f.code in UNDOWNGRADABLE
             else replace(f, level="warning", message=f.message + DRAFT_NOTE)
             for f in out
         ]
