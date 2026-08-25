@@ -1,0 +1,311 @@
+# The public demonstration.
+#
+# Builds `examples/demo-vault` and publishes each report's self-contained HTML
+# bundle to GitHub Pages, with an index over them. The bundle is the artefact
+# nothing else produces: the built pages on one tab, and on the other, one card
+# per source listing the claims that rest on it, with the archived page behind
+# every `@key`. It fetches nothing — no stylesheet, no script, no font — so it
+# works from Pages, from a USB stick, and from a machine with no network.
+#
+# Nothing here parses a report. The site is assembled from `out/manifest.json`,
+# which the engine writes and which names every artefact relative to the vault.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/demo-vault/**'
+      - 'engine/**'
+      - 'bin/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  # One deployment at a time, and never cancelled halfway: a half-published
+  # site is worse than a stale one.
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # The same pin as ci.yml. The two have to move together — the page images in
+  # these bundles are Typst's output, and a release can paginate differently.
+  TYPST_VERSION: '0.15.1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Typst ${{ env.TYPST_VERSION }}
+        shell: bash
+        run: |
+          asset=typst-x86_64-unknown-linux-musl
+          url="https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${asset}.tar.xz"
+          curl -fsSL --retry 3 --retry-delay 2 "$url" -o typst.tar.xz
+          tar -xf typst.tar.xz
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 "${asset}/typst" "$HOME/.local/bin/typst"
+          rm -rf typst.tar.xz "${asset}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache mermaid-cli
+        uses: actions/cache@v4
+        with:
+          path: examples/demo-vault/.build/mermaid
+          key: mermaid-${{ runner.os }}-${{ hashFiles('engine/config.py', 'examples/demo-vault/report-maker.toml') }}
+
+      # `--html` adds the bundles, after `pages` because the bundle inlines the
+      # page images, and before `check`, which stays last and gates the whole
+      # thing. A vault that fails the citation rule is not published.
+      - name: Build the demo vault
+        run: ./bin/report-maker -C examples/demo-vault all --html
+
+      - name: Assemble the site
+        shell: bash
+        run: |
+          python3 - "examples/demo-vault" "_site" "$GITHUB_REPOSITORY" <<'PY'
+          """Assemble the Pages site from a built vault.
+
+          Reads out/manifest.json — the engine's own description of the vault —
+          copies each report's self-contained bundle into _site/, and writes an
+          index over them. Every fact on the page comes from the manifest, and
+          the bundle itself is passed through byte for byte.
+          """
+
+          import html
+          import json
+          import shutil
+          import sys
+          from pathlib import Path
+
+          vault = Path(sys.argv[1]).resolve()
+          site = Path(sys.argv[2]).resolve()
+          repo = sys.argv[3] if len(sys.argv) > 3 else "younissk/report-maker"
+
+          manifest = json.loads(
+              (vault / "out" / "manifest.json").read_text(encoding="utf-8")
+          )
+
+          # The accent comes from the vault's own brand pack, so the index is
+          # coloured by the same decision the reports are. Design tokens live in
+          # a brand pack and nowhere else — see CLAUDE.md.
+          accent, accent_deep = "#2E5A88", "#1C3D60"
+          pack = vault / "brand" / "brand.json"
+          if pack.is_file():
+              colors = json.loads(pack.read_text(encoding="utf-8")).get("colors", {})
+              accent = colors.get("accent", accent)
+              accent_deep = colors.get("accent-deep", accent_deep)
+
+          site.mkdir(parents=True, exist_ok=True)
+          (site / ".nojekyll").write_text("", encoding="utf-8")
+
+          cards, published, missing = [], 0, []
+
+          for report in manifest.get("reports", []):
+              rid = report["id"]
+              art = report.get("artifacts", {})
+              pdf_rel = art.get("pdf")
+              if not pdf_rel:
+                  missing.append(f"{rid}: no PDF in the manifest — it was never built")
+                  continue
+
+              # The bundle sits beside the PDF under the same report id. Derived
+              # from the manifest's own path rather than assuming "out/",
+              # because report-maker.toml can move it.
+              bundle = vault / Path(pdf_rel).with_suffix(".html")
+              if not bundle.is_file():
+                  missing.append(f"{rid}: no HTML bundle at {bundle.relative_to(vault)}")
+                  continue
+
+              dest = site / f"{rid}.html"
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(bundle, dest)
+
+              pdf_src = vault / pdf_rel
+              if pdf_src.is_file():
+                  shutil.copy2(pdf_src, site / f"{rid}.pdf")
+
+              # Report titles and subtitles are user text. Escaped, every one.
+              meta = report.get("meta", {})
+              e = html.escape
+              cards.append(
+                  f'<li class="card">'
+                  f'<a class="card-link" href="{e(rid)}.html">'
+                  f'<p class="kicker">{e(str(meta.get("kind") or "Report"))}'
+                  f'<span class="dot">·</span>'
+                  f'{e(str(meta.get("date-display") or meta.get("date") or ""))}</p>'
+                  f'<h2>{e(str(meta.get("title") or rid))}</h2>'
+                  f'<p class="sub">{e(str(meta.get("subtitle") or ""))}</p>'
+                  f'</a>'
+                  f'<p class="meta"><span>{e(rid)}</span>'
+                  f'<span>{e(str(art.get("page_count", "?")))} pages</span>'
+                  f'<a href="{e(rid)}.pdf">PDF</a></p>'
+                  f'</li>'
+              )
+              published += 1
+
+          for line in missing:
+              print(f"::warning::{line}")
+
+          if not published:
+              print("::error::no report bundle was published — nothing to put on Pages")
+              raise SystemExit(1)
+
+          title = "report-maker — the demo vault"
+          page = f"""<!doctype html>
+          <html lang="en">
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>{html.escape(title)}</title>
+          <style>
+            :root {{
+              --accent: {html.escape(accent)};
+              --accent-deep: {html.escape(accent_deep)};
+              --ink: #17181a; --ink-soft: #55585e; --rule: #e2e4e8;
+              --surface: #ffffff; --ground: #f6f7f9;
+            }}
+            @media (prefers-color-scheme: dark) {{
+              :root {{ --ink: #eceef1; --ink-soft: #a3a8b0; --rule: #2b2e34;
+                       --surface: #191b1f; --ground: #101215; }}
+            }}
+            * {{ box-sizing: border-box; }}
+            body {{
+              margin: 0; padding: 0 1.25rem 4rem;
+              background: var(--ground); color: var(--ink);
+              font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+              -webkit-text-size-adjust: 100%;
+            }}
+            .wrap {{ max-width: 46rem; margin: 0 auto; }}
+            header {{ padding: 3.5rem 0 2rem; border-bottom: 3px solid var(--accent); }}
+            h1 {{ margin: 0 0 .5rem; font-size: clamp(1.6rem, 5vw, 2.2rem); line-height: 1.2; letter-spacing: -.02em; }}
+            .lede {{ margin: 0; color: var(--ink-soft); font-size: 1.05rem; }}
+            .claim {{
+              margin: 1.75rem 0 0; padding: 1rem 1.15rem;
+              background: var(--surface); border-left: 4px solid var(--accent);
+              border-radius: 0 6px 6px 0;
+            }}
+            ul {{ list-style: none; margin: 2rem 0 0; padding: 0; display: grid; gap: 1rem; }}
+            .card {{ background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }}
+            .card-link {{ display: block; padding: 1.25rem 1.25rem .75rem; text-decoration: none; color: inherit; }}
+            .card-link:hover h2, .card-link:focus-visible h2 {{ color: var(--accent); }}
+            .kicker {{ margin: 0 0 .35rem; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }}
+            .dot {{ margin: 0 .45rem; }}
+            .card h2 {{ margin: 0 0 .35rem; font-size: 1.2rem; line-height: 1.3; letter-spacing: -.01em; }}
+            .sub {{ margin: 0; color: var(--ink-soft); }}
+            .meta {{
+              display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center;
+              margin: 0; padding: .6rem 1.25rem 1rem; font-size: .8rem; color: var(--ink-soft);
+            }}
+            .meta span:first-child {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+            .meta a {{
+              margin-left: auto; color: var(--accent-deep); font-weight: 600;
+              text-decoration: none; min-height: 44px; padding: .5rem 0;
+              display: inline-flex; align-items: center;
+            }}
+            @media (prefers-color-scheme: dark) {{ .meta a {{ color: var(--accent); }} }}
+            footer {{ margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); color: var(--ink-soft); font-size: .85rem; }}
+            footer a {{ color: inherit; }}
+          </style>
+          <body>
+          <div class="wrap">
+            <header>
+              <h1>{html.escape(title)}</h1>
+              <p class="lede">Built from <code>examples/demo-vault</code> by the engine in
+                this repository, on every push to <code>main</code>.</p>
+              <p class="claim"><strong>Every citation in these pages resolves to the
+                archived page as it was on the date it was cited, with its sha256.</strong></p>
+            </header>
+            <ul>
+              {"".join(cards)}
+            </ul>
+            <footer>
+              <p>Each report opens as one self-contained file: the built pages on one tab,
+                and on the other, one card per source listing the claims that rest on it.
+                Nothing is fetched from anywhere — no stylesheet, no script, no font.</p>
+              <p>{published} report{"" if published == 1 else "s"} ·
+                <a href="https://github.com/{html.escape(repo)}">source</a></p>
+            </footer>
+          </div>
+          </body>
+          </html>
+          """
+
+          (site / "index.html").write_text(page, encoding="utf-8")
+          print(f"published {published} report(s)")
+          PY
+
+      # The claim on the index page is that these bundles fetch nothing. This
+      # is the step that makes it true rather than aspirational: a single remote
+      # asset in a public page would tell a third party the name of everyone
+      # who opened it, silently. A link to a *source* is fine and expected — a
+      # link is something a reader clicks, not something the page fetches.
+      - name: Refuse to publish anything that would fetch
+        shell: bash
+        run: |
+          python3 - "_site" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          SUBRESOURCE = (
+              ("remote script",
+               r"""<script\b[^>]*\bsrc\s*=\s*["']?\s*(?:https?:)?//"""),
+              ("remote stylesheet or font",
+               r"""<link\b[^>]*\bhref\s*=\s*["']?\s*(?:https?:)?//"""),
+              ("remote image",
+               r"""<(?:img|image)\b[^>]*\bsrc\s*=\s*["']?\s*(?:https?:)?//"""),
+              ("remote media",
+               r"""<(?:iframe|video|audio|source|embed|object)\b[^>]*\b(?:src|data)\s*=\s*["']?\s*(?:https?:)?//"""),
+              ("remote css url()",
+               r"""url\(\s*["']?\s*(?:https?:)?//"""),
+              ("css @import",
+               r"""@import\s+(?:url\()?\s*["']?\s*(?:https?:)?//"""),
+          )
+
+          files = sorted(Path(sys.argv[1]).rglob("*.html"))
+          if not files:
+              print("::error::no HTML to check — the site is empty")
+              raise SystemExit(1)
+
+          bad = 0
+          for path in files:
+              text = path.read_text(encoding="utf-8", errors="replace")
+              for label, pattern in SUBRESOURCE:
+                  for match in re.finditer(pattern, text, re.I):
+                      line = text.count("\n", 0, match.start()) + 1
+                      excerpt = text[match.start():match.start() + 90].replace("\n", " ")
+                      print(f"::error file={path},line={line}::{label}: {excerpt}")
+                      bad += 1
+
+          print(f"checked {len(files)} file(s); {bad} remote subresource(s)")
+          raise SystemExit(1 if bad else 0)
+          PY
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,4 +1,4 @@
-# report-maker — engine + desktop app
+# report-maker — engine + desktop app + web version
 #
 # This repository is the tool, not a vault. A vault is a folder somewhere on your
 # disk holding report-maker.toml; every report command runs against one:
@@ -37,6 +37,10 @@
 #   make open V=<vault>            build the app and open it on that vault
 #   make app-smoke                 build the app, drive it, screenshot each screen
 #   make app-dist                  package the app (macOS dmg + zip, unsigned)
+#   make web                       the web version, dev: API + Vite together
+#   make web-build                 build the frontend the API serves
+#   make web-docker                run the container (docker compose up --build)
+#   make web-test                  the web server's own suite
 #   make install                   CLI on PATH, app in /Applications  (macOS)
 #   make uninstall                 take both of those away again
 #   make clean V=<vault>           remove that vault's out/ and generated .build/
@@ -48,6 +52,11 @@ V   ?= examples/demo-vault
 CLI ?= ./bin/report-maker
 PY  ?= python3
 
+# The web version binds loopback on this port; the Vite dev server proxies to it.
+# One variable so the two halves cannot disagree — a proxy pointed at a port
+# nothing is listening on fails as a blank page rather than as an error.
+WEB_PORT ?= 8787
+
 # `RM` is a GNU make built-in (rm -f) and cannot be reused here — a recipe
 # written as `$(VAULT) doctor` silently expands to `rm -f doctor`.
 VAULT = $(CLI) -C $(V)
@@ -55,7 +64,8 @@ VAULT = $(CLI) -C $(V)
 .PHONY: all new list templates design design-install stage diagrams build pages \
         manifest check cite verify score diff html data data-check find index \
         todos notes sync brand-preview mcp \
-        watch doctor version test app open app-build app-smoke app-deps clean help
+        watch doctor version test app open app-build app-smoke app-deps \
+        web web-build web-docker web-test web-deps clean help
 
 all:
 	@$(VAULT) all $(R)
@@ -214,6 +224,50 @@ app-dist: app-deps
 
 app-deps:
 	@test -d app/node_modules || (cd app && npm install --no-audit --no-fund)
+
+# ── the web version ──────────────────────────────────────────────────────────
+#
+# Two halves: a standard-library Python server that shells out to the same CLI,
+# and a Vite frontend it serves. The server needs no install at all — `python3 -m
+# web` is the whole deployment story — so only the frontend has a deps step.
+#
+# Dev runs both. Vite is in the foreground and the API behind it, sharing one
+# origin through Vite's proxy so the session cookie behaves here exactly as it
+# does in production; VITE_API_ORIGIN is passed rather than assumed, because a
+# proxy aimed at the wrong port fails as a blank page and not as an error.
+# Stopping Vite takes the API with it.
+web: web-deps
+	@RM_WEB_PORT=$(WEB_PORT) $(PY) -m web & \
+	  api=$$!; trap 'kill $$api 2>/dev/null' EXIT INT TERM; \
+	  cd web/client && VITE_API_ORIGIN=http://127.0.0.1:$(WEB_PORT) npm run dev
+
+# Typechecks, then bundles into web/client/dist — the directory the server hands
+# out verbatim. Without it the API still answers; there is just no page.
+web-build: web-deps
+	@cd web/client && npm run build
+
+# The container, through compose rather than a `docker run` written out here.
+# Every decision that matters is in docker-compose.yml with the reason beside
+# it — the volume that keeps share links alive across a rebuild, the memory and
+# pid limits, and the `127.0.0.1:` on the published port, which is the one
+# character that decides whether a casual `up` puts this on the network. A
+# second copy of that command in a Makefile is a second place for one of them
+# to go missing. The image builds the frontend itself, so this does not depend
+# on `web-build`: a container needing a local build first is a container that
+# behaves differently on a machine without Node.
+#
+#   docker compose down      stop it        down -v   also delete every vault
+web-docker:
+	@docker compose up --build
+
+# Its own suite, on the same runner as the engine's — no pytest, nothing to
+# install. It drives a real server against a real engine, so it is slower than
+# `make test` and catches the half that unit tests cannot.
+web-test:
+	@$(PY) -m unittest discover -s web/tests -v
+
+web-deps:
+	@test -d web/client/node_modules || (cd web/client && npm install --no-audit --no-fund)
 
 # ── installing it on this machine ────────────────────────────────────────────
 #

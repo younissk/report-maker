@@ -58,6 +58,7 @@ import argparse
 import contextlib
 import datetime as dt
 import io
+import ipaddress
 import json
 import shutil
 import sys
@@ -416,6 +417,18 @@ def cmd_sources(args) -> int:
     return 0
 
 
+def _fetching(args) -> dict:
+    """`{"fetch": …}` when an address was pinned, and `{}` when one was not.
+
+    Absent rather than defaulted, on purpose. With no `--pinned-address` these
+    commands reach `cite` and `verify` with exactly the call they always made,
+    and the fetcher those modules name for themselves is the one that runs —
+    which is the difference between an option and a change of policy.
+    """
+    fetch = snapshot_mod.fetcher(pinned=args.pinned_address)
+    return {} if fetch is snapshot_mod.http_fetch else {"fetch": fetch}
+
+
 def cmd_cite(args) -> int:
     cfg = _config(args)
     # `cite` prints what it added and the key to cite with; nothing to add here.
@@ -426,6 +439,7 @@ def cmd_cite(args) -> int:
         key=args.key,
         type_=args.type_,
         no_snapshot=args.no_snapshot,
+        **_fetching(args),
     )
     return 0
 
@@ -433,7 +447,11 @@ def cmd_cite(args) -> int:
 def cmd_verify(args) -> int:
     cfg = _config(args)
     drifts = verify_mod.verify(
-        cfg, args.target, offline=args.offline, refresh=args.refresh
+        cfg,
+        args.target,
+        offline=args.offline,
+        refresh=args.refresh,
+        **_fetching(args),
     )
     if args.json:
         print(json.dumps(verify_mod.to_json(drifts), indent=2))
@@ -824,6 +842,47 @@ TARGET_HELP = (
 )
 
 
+def _ip_literal(value: str) -> str:
+    """`--pinned-address` takes an address, not a name — refused at the door.
+
+    `snapshot._ip_literal` says the same thing at the point of use; this one
+    exists so the refusal arrives as a usage error before a report is loaded,
+    rather than as a failed fetch three steps in.
+    """
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not an IP address. A pinned address is the literal to "
+            "connect to; a name would have to be resolved, which is the lookup "
+            "pinning removes."
+        ) from exc
+
+
+def _pinned_address(p: argparse.ArgumentParser) -> None:
+    """Connect to a vetted address, keeping the hostname for TLS and `Host`.
+
+    For a caller that is not the person at the keyboard. A server citing a URL a
+    stranger typed resolves the name, judges every address it answers with, and
+    then has to hand the URL to this command — which used to resolve the name
+    all over again, so a name server willing to answer twice differently chose
+    the address for a fetch that was approved against another one. Passing the
+    vetted literal here closes that window: the connection goes where the caller
+    looked, the certificate is still checked against the hostname, and a
+    redirect off that origin is refused rather than followed on its scheme.
+
+    Nobody typing this at a terminal needs it, and without it nothing changes.
+    """
+    p.add_argument(
+        "--pinned-address",
+        metavar="IP",
+        type=_ip_literal,
+        help="connect to this address instead of resolving the hostname, keeping "
+             "the hostname for Host, TLS SNI and the certificate check (for a "
+             "caller that has already vetted where the name resolves)",
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="report-maker",
@@ -971,6 +1030,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--type", dest="type_", metavar="TYPE",
                    help="hayagriva type, e.g. Web, Report, Article (default: Web)")
     p.add_argument("--no-snapshot", action="store_true", help="add the entry without archiving the page")
+    _pinned_address(p)
     p.set_defaults(func=cmd_cite)
 
     p = target(sub.add_parser("verify", help="re-fetch archived sources and report drift"))
@@ -979,6 +1039,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--refresh", action="store_true",
                    help="re-archive changed pages, keeping the old copy")
     p.add_argument("--json", action="store_true")
+    _pinned_address(p)
     p.set_defaults(func=cmd_verify)
 
     p = target(sub.add_parser("score", help="evidence density per report"))

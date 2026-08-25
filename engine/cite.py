@@ -23,6 +23,8 @@ attribution is a worse failure than a missing one.
 from __future__ import annotations
 
 import datetime as dt
+import re
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 
 from . import snapshot, sources
@@ -107,6 +109,36 @@ def _entry_type(content_type: str, explicit: str | None) -> str:
     return "Report" if mime == "application/pdf" else "Web"
 
 
+def _iso_date(value: str) -> str | None:
+    """A date Hayagriva will accept, or nothing at all.
+
+    A page announces its publication date in whatever shape its CMS favours — an
+    MDN article says `2026-03-22T23:36:38.000Z`, an RSS lineage says
+    `Tue, 22 Mar 2026 23:36:38 GMT`, some pages manage only a year. Hayagriva
+    parses `YYYY`, `YYYY-MM` and `YYYY-MM-DD` and refuses everything else, so
+    writing the raw string through means a successful `cite` can leave a report
+    that no longer builds — the one failure a convenience command must never
+    cause. Anything that cannot be reduced to those three shapes is dropped: a
+    missing date costs a reader nothing, and an invented one is exactly the
+    small fabrication this tool exists to refuse.
+    """
+    if not value:
+        return None
+    text = str(value).strip()
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})", text)
+    if match:
+        return "-".join(match.groups())
+    match = re.match(r"^(\d{4})-(\d{2})$", text)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}"
+    try:
+        return parsedate_to_datetime(text).date().isoformat()
+    except (TypeError, ValueError, IndexError):
+        pass
+    match = re.match(r"^(\d{4})$", text)
+    return match.group(1) if match else None
+
+
 def _fields(
     url: str, meta: dict, content_type: str, accessed: str, type_: str | None
 ) -> dict:
@@ -118,8 +150,9 @@ def _fields(
         fields["author"] = meta["author"]
     if meta.get("site"):
         fields["publisher"] = meta["site"]
-    if meta.get("published"):
-        fields["date"] = meta["published"]
+    published = _iso_date(meta.get("published", ""))
+    if published:
+        fields["date"] = published
     fields["url"] = sources.url_field(url, accessed)
     return fields
 

@@ -25,6 +25,34 @@ into a file-exfiltration tool. That check is a security boundary, not a
 convenience, and it is applied to the URL we were given *and* to wherever the
 redirects landed. The second is that fetching must be injectable, so every test
 in this repository runs with the network unplugged.
+
+**The scheme check alone was never sufficient, and saying why is the point of
+this paragraph.** It answers "what protocol will we speak", and the question a
+caller who vetted a URL actually needs answered is "which machine will we speak
+it to". Those come apart in two places, both of them ordinary:
+
+- **The name is resolved again.** Somebody — `report-maker cite` called from a
+  server, a wrapper that checks a URL before handing it over — looks the host
+  up, judges every address it answers with, and passes the URL on. This module
+  then calls `getaddrinfo` a second time, and a name server willing to answer
+  the two lookups differently has just chosen the address for a fetch that was
+  approved against a different one. That is a DNS rebind, and no amount of
+  checking the *string* catches it.
+- **A redirect is followed on its scheme.** `302 Location:
+  http://169.254.169.254/latest/meta-data/` is `http`, so it passed, and the
+  cloud metadata endpoint was archived into `snapshots/` where whoever asked
+  for the citation reads it straight back. No hostile resolver, no timing, one
+  header.
+
+So `http_fetch` takes `pinned=` and `on_redirect=`. A pinned fetch connects to
+the literal address the caller vetted while keeping the hostname for the `Host`
+header, the TLS SNI and the certificate check — nothing about verification is
+relaxed to make that work, the stdlib is simply handed a socket already opened
+somewhere approved — and it refuses a redirect that leaves the origin it was
+pinned for. `on_redirect` sees every hop before it is followed and aborts the
+fetch by raising. Both default to off: a person citing a URL at a terminal is
+the caller *and* the vetter, and gets exactly the fetch this module has always
+made.
 """
 
 from __future__ import annotations
@@ -33,8 +61,11 @@ import codecs
 import contextlib
 import datetime as dt
 import hashlib
+import http.client
+import ipaddress
 import json
 import re
+import socket
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -150,20 +181,242 @@ class _WebOnlyRedirects(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_WebOnlyRedirects)
 
 
-def http_fetch(url: str, timeout: float = 20.0) -> Fetched:
+# ── pinning ──────────────────────────────────────────────────────────────────
+#
+# Everything below is off unless a caller asks for it. It exists for the one
+# situation the module docstring describes: somebody other than the person at
+# the keyboard vetted this URL, and the vetting is only worth anything if the
+# connection goes where they looked.
+
+
+#: What `on_redirect` is handed, and what it may hand back. Raising aborts the
+#: fetch. Returning an IP literal pins that hop, so a caller who vets a
+#: redirect can also say which address it vetted; returning `None` leaves the
+#: hop to the pin map, which refuses it unless it stays on a pinned origin.
+Watcher = Callable[[str], str | None]
+
+
+def _ip_literal(address: str) -> str:
+    """A pinned address is a literal, and this is where that is insisted on.
+
+    A hostname here would have to be resolved, and the resolution is the exact
+    step pinning exists to remove. Refusing it is not pedantry: `--pinned-address
+    metadata.internal` would look like a pin and be a lookup.
+    """
+    try:
+        return str(ipaddress.ip_address(address.strip()))
+    except ValueError as exc:
+        raise SnapshotError(
+            f"{address!r} is not an IP address — a pinned address is the literal "
+            "the connection is made to.\n"
+            "  A name would have to be resolved here, and that second lookup is "
+            "what pinning exists to remove."
+        ) from exc
+
+
+def _origin(url: str) -> tuple[str, int]:
+    """The (host, port) a URL connects to: lowercased, with the scheme's default.
+
+    Pins are keyed on this rather than on the URL, because a redirect within one
+    site changes the path and connects to the same place — and because `HOST`
+    and `host` are one machine.
+    """
+    parts = urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise SnapshotError(f"{url!r} does not name a port number: {exc}") from exc
+    host = (parts.hostname or "").strip().lower()
+    return host, port or (443 if parts.scheme.lower() == "https" else 80)
+
+
+def _vet_hop(pins: dict[tuple[str, int], str], newurl: str, watch: Watcher | None) -> None:
+    """Show a redirect to the watcher, then hold it to the pin map.
+
+    Order matters. The watcher sees the hop first, so a caller that wants to
+    judge an address can add it; what it does not add is refused, because a pin
+    that lets an unvetted origin through on the strength of nobody having
+    objected is not a pin.
+    """
+    if watch is not None:
+        vetted = watch(newurl)  # raising here aborts the fetch, by contract
+        if pins and vetted:
+            pins[_origin(newurl)] = _ip_literal(str(vetted))
+    if not pins or _origin(newurl) in pins:
+        return
+    known = ", ".join(f"{host}:{port}" for host, port in sorted(pins))
+    raise SnapshotError(
+        f"refusing to follow the redirect to {newurl}: this fetch is pinned to "
+        f"{known}, and that hop leaves it.\n"
+        "  The address was vetted by whoever asked for this fetch; a hop they "
+        "never saw is a hop nobody checked, and following it on the strength of "
+        "its scheme is how a redirect reaches a private address."
+    )
+
+
+def _guarded_opener(
+    pins: dict[tuple[str, int], str], watch: Watcher | None
+) -> urllib.request.OpenerDirector:
+    """An opener that connects only where it was told, and reports every hop.
+
+    Built by hand rather than with `build_opener`, for two reasons. It installs
+    `FileHandler`, `FTPHandler` and `DataHandler` by default, which is a set of
+    doors this fetch has no use for; and it installs a `ProxyHandler` taken from
+    the environment, which would resolve the hostname at the far end and undo
+    the pin without anything looking wrong.
+    """
+
+    def create_connection(address, timeout, source_address):
+        """`http.client`'s socket factory, replaced with a pinned one.
+
+        Everything downstream of it is the stdlib's own and untouched — the
+        `TCP_NODELAY` it sets, and for TLS the `wrap_socket(...,
+        server_hostname=self.host)` in `HTTPSConnection.connect`. That is the
+        whole trick: the certificate is still verified against the *name* the
+        caller asked for, with the default context's `check_hostname` and
+        `CERT_REQUIRED` intact. Nothing is disabled to make pinning work.
+        """
+        host = str(address[0]).strip("[]").lower()
+        port = int(address[1])
+        pinned = pins.get((host, port))
+        if pinned is None:
+            raise SnapshotError(
+                f"refusing to connect to {host}:{port}: this fetch is pinned, "
+                "and that host is not one of the addresses that were vetted.\n"
+                "  A pinned fetch connects where the caller checked, or it does "
+                "not connect."
+            )
+        return socket.create_connection((pinned, port), timeout, source_address)
+
+    class _PinnedConnection:
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self._create_connection = create_connection
+
+        def connect(self) -> None:
+            if self._tunnel_host:
+                raise SnapshotError(
+                    "refusing to fetch through a proxy: the proxy resolves the "
+                    "hostname at its end, which undoes the pin"
+                )
+            super().connect()
+
+    class _Plain(_PinnedConnection, http.client.HTTPConnection):
+        pass
+
+    class _Secure(_PinnedConnection, http.client.HTTPSConnection):
+        pass
+
+    class _PlainHandler(urllib.request.HTTPHandler):
+        def http_open(self, req):
+            return self.do_open(_Plain, req)
+
+    class _SecureHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(_Secure, req, context=self._context)
+
+    class _WatchedRedirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            _require_web_scheme(newurl, after_redirect=True)
+            _vet_hop(pins, newurl, watch)
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    transport: tuple[urllib.request.BaseHandler, ...] = (
+        (_PlainHandler(), _SecureHandler())
+        if pins
+        else (urllib.request.HTTPHandler(), urllib.request.HTTPSHandler())
+    )
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        *transport,
+        _WatchedRedirects(),
+        urllib.request.HTTPErrorProcessor(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        # Refuses every other scheme *loudly*. Without it an opener with no
+        # handler for `file:` does not raise — `open` runs out of handlers and
+        # returns None, and the caller meets an AttributeError somewhere else.
+        urllib.request.UnknownHandler(),
+    ):
+        opener.add_handler(handler)
+    return opener
+
+
+def fetcher(*, pinned: str | None = None, on_redirect: Watcher | None = None) -> Fetcher:
+    """A `Fetcher` with a pin and a watcher baked in — or `http_fetch` itself.
+
+    With neither argument this returns the module-level function unchanged, so
+    the default path is not merely equivalent to today's, it *is* today's. That
+    is the property `report-maker cite <url>` at a terminal depends on.
+
+    With a pin it returns a fetcher that pins each URL it is given to that
+    address — and refuses the second *different* origin in one run. A single
+    address names one machine, so a `verify` pass reaching two hosts under one
+    pin is a caller mistake, and it is better to say so than to connect the
+    second host to the first one's address and report the resulting mess as
+    evidence drift.
+    """
+    if pinned is None and on_redirect is None:
+        return http_fetch
+    address = _ip_literal(pinned) if pinned is not None else None
+    bound: dict[tuple[str, int], str] = {}
+
+    def fetch(url: str) -> Fetched:
+        if address is not None:
+            where = _origin(url)
+            if not bound:
+                bound[where] = address
+            elif where not in bound:
+                held = ", ".join(f"{host}:{port}" for host, port in sorted(bound))
+                raise SnapshotError(
+                    f"refusing to fetch {url}: this run is pinned to {held}, and "
+                    "one address cannot stand for two hosts.\n"
+                    "  Pin a run that reaches one host, or fetch the rest "
+                    "without a pin and vet them another way."
+                )
+        return http_fetch(url, pinned=address, on_redirect=on_redirect)
+
+    return fetch
+
+
+def http_fetch(
+    url: str,
+    timeout: float = 20.0,
+    pinned: str | None = None,
+    on_redirect: Watcher | None = None,
+) -> Fetched:
     """Fetch a URL for archiving. Redirects are followed; schemes are not trusted.
 
     An HTTP error status comes back as a `Fetched` rather than an exception: a
     404 on a page a report cites is a *finding*, and the body the server sent
     with it is worth keeping. Only a failure to speak to the server at all — DNS,
     TLS, a timeout — raises.
+
+    `pinned` is an IP literal, and it means: connect *there*, and keep `url`'s
+    hostname for the `Host` header, the TLS SNI and the certificate check. It is
+    for a caller who resolved the name and judged the addresses already — a
+    server citing a URL a stranger typed — so that the fetch happens against
+    what was judged rather than against whatever the resolver says a second time.
+    A pinned fetch also refuses a redirect off the origin it was pinned for,
+    because a hop the caller never saw is a hop nobody vetted.
+
+    `on_redirect` is called with every hop before it is followed, and anything it
+    raises aborts the fetch. It may return an IP literal to pin that hop.
+
+    Both default to `None`, and with both unset this is the fetch it has always
+    been, through the module-level opener.
     """
     _require_web_scheme(url)
+    opener = _OPENER
+    if pinned is not None or on_redirect is not None:
+        opener = _guarded_opener(
+            {_origin(url): _ip_literal(pinned)} if pinned is not None else {},
+            on_redirect,
+        )
     request = urllib.request.Request(
         url, headers={"User-Agent": USER_AGENT, "Accept": "*/*"}
     )
     try:
-        with _OPENER.open(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             # Belt and braces: the redirect handler above refuses a non-web hop
             # before it happens, and this catches anything that reached us anyway.
             final = response.geturl() or url

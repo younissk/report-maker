@@ -1,0 +1,30 @@
+# A mirror, and it is honest about being one.
+#
+# Docker reads the ignore file at the root of the BUILD CONTEXT. `web/Dockerfile`
+# is built with the repository root as its context — it has to be, because the
+# image carries `engine/` and `bin/report-maker` — so the file that actually
+# governs that build is `/.dockerignore`, one level up. Keep the two in step.
+#
+# This file matters when somebody builds with `web/` as the context:
+#
+#     docker build -f Dockerfile -t something .      # run from inside web/
+#
+# which cannot produce the image this repository ships (the engine is not in
+# that context), but which is exactly the mistake that otherwise uploads
+# `client/node_modules` — a few hundred megabytes — before failing.
+
+# Generated, and rebuilt inside the image anyway.
+client/node_modules/
+client/dist/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.tsbuildinfo
+**/.DS_Store
+
+# Not code the server runs.
+tests/
+README.md
+fly.toml
+render.yaml
+Dockerfile

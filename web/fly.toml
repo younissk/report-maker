@@ -1,0 +1,118 @@
+# report-maker web on fly.io — a worked example, not a template to paste blind.
+#
+#     fly apps create report-maker-web              once, with your own name
+#     fly volumes create report_maker_data --size 3 --region fra
+#     fly deploy . --config web/fly.toml --dockerfile web/Dockerfile
+#
+# Run that `deploy` FROM THE REPOSITORY ROOT, and note the trailing `.`: the
+# image carries `engine/` and `bin/report-maker` as well as the server, so the
+# build context has to be the repository, not `web/`. Point flyctl at `web/`
+# and the build fails on `COPY engine/` — which is the good failure.
+#
+# ── ONE MACHINE. This is a constraint, not a suggestion. ─────────────────────
+#
+# `web/README.md` item 5: the rate limiter and the per-session command tally
+# live in memory. Two machines means every limit is doubled and a session that
+# lands on the other machine does not exist — its vault is on a volume the
+# other machine cannot mount. Keep `min_machines_running`/`max` at one until
+# there is a shared store. `fly scale count 1`.
+
+app = "report-maker-web"        # ← yours
+primary_region = "fra"          # ← wherever your readers are
+
+[build]
+  # Relative to the working directory of the `fly deploy` above, i.e. the
+  # repository root.
+  dockerfile = "web/Dockerfile"
+
+[env]
+  # The store: `sessions/<id>/vault/` and `shares/<token>.html`. It must be the
+  # volume mount below — the default is a per-run temp dir, and on fly that
+  # means every session and every share link handed out disappears the next
+  # time a machine restarts.
+  #
+  # Long and project-specific rather than `/data`, and that is load-bearing:
+  # the server strips this prefix out of every JSON string on the way out,
+  # file text included, so a short root corrupts reports that happen to
+  # contain it. See the measured note in `web/Dockerfile`.
+  RM_WEB_ROOT = "/var/lib/report-maker"
+
+  # fly terminates TLS, so the session cookie must carry `Secure`. Without
+  # this it travels in the clear to anyone who can downgrade a request.
+  RM_WEB_SECURE_COOKIE = "1"
+
+  # Thirty days. `0` keeps share links for ever — they are immutable by
+  # design, so deleting the file is the only revocation, and the volume is
+  # then your problem to watch.
+  RM_WEB_SHARE_TTL_HOURS = "720"
+
+  # NOT set, deliberately: `RM_WEB_DIAGRAMS`. It drives mermaid, which drives
+  # a headless Chrome per render. The runtime image has no node in it at all,
+  # so setting this here would not turn diagrams on anyway — it would need a
+  # different image, built on purpose.
+
+# ── GitHub mode ──────────────────────────────────────────────────────────────
+#
+# These are SECRETS and must never appear in this file, which is committed.
+# Set them with `fly secrets set`, which stores them encrypted and restarts the
+# app:
+#
+#     fly secrets set \
+#       RM_WEB_GITHUB_CLIENT_ID=Iv1.xxxxxxxxxxxx \
+#       RM_WEB_GITHUB_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+#       RM_WEB_GITHUB_CALLBACK=https://report-maker-web.fly.dev/api/github/callback
+#
+# The callback must match the Authorization callback URL on the GitHub OAuth
+# app exactly, scheme and all.
+#
+# For a single-user, self-hosted deployment, one personal access token instead
+# of the three above — a server-side variable, never a field in the UI:
+#
+#     fly secrets set RM_WEB_GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+#
+# LEAVING THEM UNSET IS A SUPPORTED CONFIGURATION, not a broken one. GitHub
+# mode is simply OFF: `GET /api/github/status` answers "off", the UI says so
+# plainly rather than showing a dead button, and try mode — the default
+# experience, and the reason to deploy this at all — is unaffected.
+#
+# `report-maker sync` also runs `git commit`, and git refuses to commit with no
+# identity. Set GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL / GIT_COMMITTER_NAME /
+# GIT_COMMITTER_EMAIL if you turn GitHub mode on. They are not defaulted here
+# on purpose: a commit attributed to a plausible-looking name nobody chose is a
+# false statement in the one place this project treats as a record.
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+
+  # One machine, and it holds the only copy of every live session vault, so it
+  # does not get to stop while somebody is mid-report. Suspend rather than
+  # stop, and never scale past one.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 25
+    hard_limit = 50
+
+  # The image has its own HEALTHCHECK; this is the one fly routes on.
+  # `/api/health` answers `{ok, version, diagrams, github}` and never a path,
+  # so a public probe against it publishes nothing about this machine.
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+
+[[mounts]]
+  source = "report_maker_data"
+  destination = "/var/lib/report-maker"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  # typst holds a rendered document in memory, and this server compiles source
+  # a stranger wrote. 512 MB will OOM on a real report; 1 GB is the floor.
+  memory = "1gb"

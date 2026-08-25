@@ -1,10 +1,10 @@
 # report-maker
 
-A headless engine for evidence-grade reports, plus a desktop app over it. A
-folder-based **vault** in; branded PDFs, page images, rendered diagrams, archived
-sources and a JSON manifest out. No database, no server, no prompts — every
-command ends by writing a file, so the same code runs from a shell, a Makefile,
-CI, or an agent.
+A headless engine for evidence-grade reports, plus a desktop app and a web
+version over it. A folder-based **vault** in; branded PDFs, page images, rendered
+diagrams, archived sources and a JSON manifest out. The engine has no database,
+no server and no prompts — every command ends by writing a file, so the same code
+runs from a shell, a Makefile, CI, an agent, or either front end.
 
 It enforces one rule: **something is either cited, or it is an opinion.**
 
@@ -84,9 +84,14 @@ its own, so nothing in this repository knows or cares which vaults exist.
 bin/report-maker      the CLI entry point
 engine/               the engine — Python, standard library only
 app/                  the desktop app (Electron)
+web/                  the web version — a stdlib HTTP server, and a React client
 examples/demo-vault/  a sample vault, for development and the app's smoke test
 tests/                engine unit tests
 ```
+
+`app/` and `web/` are front ends. Neither holds logic about a vault: every
+question they ask is a `report-maker` subprocess, so neither can ever disagree
+with the CLI.
 
 ## Designs
 
@@ -715,19 +720,191 @@ vault is a `report-maker` subprocess, so it can never disagree with the CLI. `�
 saves, `⌘B` saves and builds the report the open file belongs to, then reloads
 the PDF. See [app/README.md](app/README.md).
 
+## The web version
+
+`web/` is the same engine behind an HTTP server: open the page, get a working
+vault a second later, write a report, build it, and send somebody a link that
+carries the evidence with it. Nothing for the reader to install, and nothing for
+the writer to configure.
+
+The server is Python and the standard library — `http.server`, no framework —
+which is a decision rather than an economy. Every route spends its time waiting
+on a `report-maker` subprocess, so a framework would buy routing and middleware
+that fits in a few hundred lines here, at the price of turning deployment into a
+dependency tree. `python3 -m web` is the whole of it. The frontend is Vite,
+React and CodeMirror, built to `web/client/dist`, which that same server hands
+out.
+
+Like the app, it holds no logic about vaults. What reports exist, what a build
+produced, whether the citation rule holds, whether a source still says what it
+said — each is a subprocess, so the browser and the terminal cannot disagree.
+See [web/README.md](web/README.md).
+
+### Two modes
+
+| | account | where the work lives | lifetime |
+|---|---|---|---|
+| **try** | none — this is the default | a session vault in the server's own store, seeded from the `base` starter | 24 idle hours, then swept, vault and all |
+| **github** | your GitHub | your repository. The server keeps a session record and nothing else | your repository's |
+
+Try mode is the front door: `POST /api/session` hands out a vault and a report
+to edit, and nothing asks who you are. GitHub mode is **off unless the operator
+configured it** — `RM_WEB_GITHUB_CLIENT_ID`, `RM_WEB_GITHUB_CLIENT_SECRET` and
+`RM_WEB_GITHUB_CALLBACK`. With those unset the API says so in words and the UI
+shows no button, because a dead button is worse than an honest absence:
+
+```json
+{"configured": false, "available": false, "mode": "off",
+ "reason": "GitHub is not configured on this server. …"}
+```
+
+Connecting a repository shallow-clones it into the session vault, offers to
+`init` it if it has no `report-maker.toml`, and commits and pushes back through
+`report-maker sync` — never `--force`, never without an explicit action in that
+request, and every refusal `sync` makes passed through word for word. A refusal
+summarised to "push failed" teaches people to reach for `--force` unaided, which
+is the outcome that module exists to prevent.
+
+### Why git, and not Drive
+
+Google Drive is deliberately absent, and the reason is not effort. `sync`, `diff`
+and the version timeline all lean on git: `diff` needs to name a revision and get
+back the tree as it was, and the timeline is `git log` over one report's folder.
+Drive has no atomic commits, no history you can address and no diff. Connecting
+it would mean giving up three features that already work in order to gain a file
+picker.
+
+### Running it
+
+```bash
+make web                          # the API and the Vite dev server, together
+make web-build                    # build the frontend the server serves
+make web-test                     # the web suite
+python3 -m web                    # the API alone, on http://127.0.0.1:8787
+```
+
+`make web` runs both halves and points Vite's proxy at the API's port, so the
+browser sees one origin and the session cookie behaves in development exactly as
+it does in production. Stopping Vite stops the API with it.
+
+### The share link
+
+`POST /api/share/<id>` runs `all --html` and mints a token; `GET /s/<token>` is
+the only public route in the server — no cookie, no session, no login. What it
+serves is the self-contained bundle, so the page carries its own proof: every
+citation opens the archived copy of the source as it was on the day it was
+cited, with its sha256. That is the artefact nobody else can hand you, and it is
+the reason to send someone a link rather than a PDF.
+
+Two rules make it worth trusting. A report that fails `check` **cannot be
+shared** — a share is the outward-facing act, and publishing something the rule
+rejects is exactly what this tool exists to prevent. (A `draft` shares fine and
+says so on its own cover.) And the bundle is verified to be genuinely
+self-contained before it is published: one remote image in it would tell a third
+party the name of everyone who opened your link, silently.
+
+Shares are immutable. Re-sharing mints a new token, and the old link keeps
+serving what it always served.
+
+### Security posture
+
+This server runs source a stranger wrote, on your CPU. So, plainly:
+
+**What is sandboxed.** It binds `127.0.0.1` and prints a warning naming what the
+port can do if you bind anything else. Every path in a request is resolved and
+confirmed to sit inside that session's vault before a byte is read or written —
+`..` is refused outright rather than normalised away, a symlink whose target
+leaves is refused, and containment is decided on the parent chain, never a string
+prefix, so `…/vault-evil` is not inside `…/vault`. `-C` is the server's and never
+the request's: the bridge refuses the flag in any argument and requires the
+resolved vault to be a strict descendant of the session store before it spawns
+anything. Typst is the sandbox we lean on for the build itself — it cannot reach
+the network or the shell and reads only under `--root`, which is always the
+session vault. Quotas are per session (50 MB of disk, 60 seconds per command, 200
+commands an hour, 20 reports) and requests are rate-limited per address. The
+session id is an `HttpOnly` cookie that never appears in a URL, in a response
+body or in a log line — `POST /api/session` returns a label and the quota, not
+the id, because returning it would make `HttpOnly` a decoration. Every JSON body
+is walked on the way out and this machine's paths removed. The page is served
+under a CSP with a nonce and no external host.
+
+**What is off by default, and why.** `template install` and `template update`
+both fetch arbitrary git repositories — one from a URL in the request, the other
+from URLs recorded in a vault that in GitHub mode came from somebody's repo. Same
+hole, two doors, both shut with a 403 that says which. Diagrams are off unless
+`RM_WEB_DIAGRAMS=1`: mermaid drives a headless Chrome once per render, which is
+the largest attack surface in the tool and a trivial denial of service. With it
+off the server also removes `node`, `npm` and `npx` from the subprocess `PATH`,
+because `report-maker all` renders diagrams as its second step — seventeen bytes
+of mermaid and one press of Build otherwise buys an npm install measured at
+460 MB arriving inside a 50 MB quota, which no check on the *next* write can
+undo.
+
+**What is not closed.** [web/README.md](web/README.md) carries the list, and it is
+kept there rather than here because it moves as the engine does. The standing
+ones are worth knowing before you host this:
+
+| | |
+|---|---|
+| Typst's `--root` follows symlinks | so the build sandbox holds only while no symlink reaches a session vault. Nothing can create one today — every write goes through the path check, and every `git` call carries `core.symlinks=false` — and that is a constraint on anything added later, not a fact that stays true by itself |
+| One process only | the rate limiter and the per-session tally are in memory. Two workers and every limit doubles |
+| `X-Forwarded-For` is not trusted | the limiter keys on the socket, so behind a proxy that is one bucket for the whole proxy and the proxy has to limit too |
+| Shares are immutable | deleting the file is the only way to revoke a link. `RM_WEB_SHARE_TTL_HOURS` sweeps them |
+| An online `verify` needs a named report | for a whole vault it is refused: it would re-fetch every archived URL with nobody having looked at them |
+
+Quotas and an SSRF pre-flight are not the same thing as an authenticated
+service. Put something that knows who your users are in front of this before it
+is reachable from the internet.
+
+### Deploying
+
+```bash
+make web-docker                   # docker compose up --build
+docker compose down               # stop it; `down -v` also deletes every vault
+```
+
+`web/Dockerfile` builds `python:3.12-slim` plus a checksum-pinned `typst`, the
+frontend built in a Node stage that the runtime image does not carry, a non-root
+user and a healthcheck on `/api/health`. `docker-compose.yml` runs it, publishes
+the port on **`127.0.0.1` only**, and carries a memory and pid limit — typst
+holds a whole rendered document in memory, and a limit turns "somebody built a
+900-page report" into a failed build rather than a dead host.
+
+Anywhere else, the deployment is one process:
+
+```bash
+RM_WEB_ROOT=/var/lib/report-maker \
+RM_WEB_SECURE_COOKIE=1 \
+python3 -m web --host 0.0.0.0 --port 8787
+```
+
+Three things matter wherever it lands. **Set `RM_WEB_ROOT`** to a real volume —
+the default is a per-run temp dir, so a restart loses every open session and
+every share link ever handed out, and a share is meant to still open after you
+closed the tab. **Terminate TLS in front and set `RM_WEB_SECURE_COOKIE=1`**, or
+the session cookie has no `Secure` flag and travels in the clear. **Leave
+`RM_WEB_DIAGRAMS` unset** unless you know what you are hosting.
+
+There is no build step for the server and no process manager to satisfy: it is
+one Python process with no dependencies, so anything that can run `python3 -m
+web` next to a `typst` binary can host it.
+
 ## Requirements
 
 - **Typst** — required. `brew install typst`.
 - **Node + a system Chrome** — only for mermaid diagrams. mermaid-cli installs
   itself into `.build/mermaid/` on first use and drives the system browser
-  headlessly; it never downloads its own.
+  headlessly; it never downloads its own. The desktop app and the web version's
+  frontend are also built with Node; the web *server* needs none, and hides Node
+  from its subprocesses when diagrams are off.
 - **git** — only for `sync`, `diff` and `template install`.
-- **Python 3.11+** — standard library only.
+- **Python 3.11+** — standard library only. That holds for `web/` too.
 
 ## Tests
 
 ```bash
 make test                      # engine
+make web-test                  # the web server: API, sessions, sharing, the guards
 make app-build                 # the app: typecheck both projects + bundle
 make app-smoke                 # the app: launch it and screenshot the window
 ```
@@ -738,6 +915,13 @@ the search index and the git wrapper — the places where a failure would be
 silent, and the build would go green with the rule quietly no longer true.
 Nothing in the suite touches the network: every fetch goes through an injected
 fetcher, so `cite` and `verify` are tested with the plug pulled.
+
+`make web-test` is a second suite over `web/`, on the same runner. It drives a
+real server on an ephemeral port against a real session and a real engine —
+nothing stubbed — through the whole loop, and beside that walk sit the refusals
+that have to hold while it runs: an unknown session, a traversal in `?path=`, a
+symlink out of the vault, `template install`, several SSRF targets, both quotas,
+an oversized body and a cross-site write. The build tests skip without Typst.
 
 `tests/test_render.py` is the exception to "tests read source files": it renders
 page 1 of each example report and compares a perceptual hash against

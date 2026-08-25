@@ -1,0 +1,93 @@
+// report-maker in GitHub Codespaces — the "try it without installing anything"
+// path. Open the repository, press `.` or "Create codespace", and a minute
+// later you have python 3.12, node 22 and a PINNED typst, with the engine and
+// both test suites already run for you.
+//
+// This file lives at the REPOSITORY ROOT rather than in `web/`, because the
+// devcontainer is for the whole project: the engine, the desktop app's
+// TypeScript, and the web version share one box.
+//
+// It is deliberately NOT the deployment image. `web/Dockerfile` ships the
+// server and nothing else — no node, no npm, no curl — because diagrams are
+// off by default and leaving the runtime out is what makes that real. A
+// development box wants all three, so the two images are different on purpose
+// and must not be merged.
+{
+  "name": "report-maker",
+
+  // Python is the engine's only requirement and the web server's entire
+  // stack — standard library, nothing to install, which is why there is no
+  // `pip install` step anywhere below.
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+
+  "features": {
+    // Node is here for the frontend (Vite) and the desktop app (Electron).
+    // It is ALSO what mermaid needs, so `report-maker diagrams` works in a
+    // codespace where it does not in the deployed container. That asymmetry
+    // is the point: a developer rendering their own diagrams is not the same
+    // risk as a server rendering a stranger's.
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+
+  // 8787 is the API; 5173 is Vite, which proxies to it so the session cookie
+  // is same-origin here exactly as it is in production. `make web` starts
+  // both and Vite is the one to open.
+  "forwardPorts": [8787, 5173],
+  "portsAttributes": {
+    "5173": { "label": "report-maker web (open this one)", "onAutoForward": "notify" },
+    "8787": { "label": "report-maker API", "onAutoForward": "silent" }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "myriad-dreamin.tinymist",
+        "bradlc.vscode-tailwindcss",
+        "esbenp.prettier-vscode",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "files.insertFinalNewline": true,
+        "files.trimTrailingWhitespace": true,
+        "[typst]": { "editor.wordWrap": "on" }
+      }
+    }
+  },
+
+  // typst is PINNED and checksummed, the same version and the same two hashes
+  // as `web/Dockerfile`. Move one and you must move the other, or a codespace
+  // and the deployed container disagree about how a page paginates — which is
+  // precisely the thing this project's colophon exists to make answerable.
+  // Fetching `latest` here would put that disagreement one `docker build`
+  // away and give nobody a way to notice.
+  //
+  // There is deliberately no `apt-get` in here, and that is a bug fix rather
+  // than minimalism. MEASURED with `devcontainer up`: the node feature leaves
+  // a yarn apt source behind whose signing key this image does not carry, so
+  // `apt-get update` exits 100 on `NO_PUBKEY 62D54FD4003F6525` and the whole
+  // create fails before typst is ever fetched — on the first click, for
+  // everyone. Nothing needed one: `make`, `curl`, `tar`, `xz`, `git`,
+  // `python3` and `node` are all already in this image. Fonts are the only
+  // thing the deployment image installs and this one does not, and typst
+  // carries its own fallbacks, so a report still renders here.
+  "onCreateCommand": "set -eu; echo '\u2500\u2500 installing typst 0.15.1 (pinned, checksummed) \u2500\u2500'; V=0.15.1; case $(uname -m) in x86_64) A=x86_64; S=a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c;; aarch64|arm64) A=aarch64; S=5aa8d74a3d906e60ea12a66ac2f37f8eef1b14cbad7182a745e393a10c23dcee;; *) echo no pinned typst build for $(uname -m) - add its checksum to .devcontainer/devcontainer.json; exit 1;; esac; N=typst-$A-unknown-linux-musl; curl -fsSL --retry 3 --retry-delay 2 -o /tmp/$N.tar.xz https://github.com/typst/typst/releases/download/v$V/$N.tar.xz; printf '%s  /tmp/%s.tar.xz\\n' $S $N | sha256sum -c -; tar -xJf /tmp/$N.tar.xz -C /tmp; sudo install -m 0755 /tmp/$N/typst /usr/local/bin/typst; rm -rf /tmp/$N /tmp/$N.tar.xz; typst --version; sudo ln -sfn $PWD/bin/report-maker /usr/local/bin/report-maker; echo '\u2500\u2500 installing the frontend dependencies \u2500\u2500'; npm ci --prefix web/client --no-audit --no-fund",
+
+
+  // Run the suites so a new contributor sees the real state of the tree in the
+  // first minute rather than in the first pull request. The web suite is green
+  // on Linux; the engine suite has two known platform failures, and the banner
+  // names both rather than quietly skipping them — a first run that hides a
+  // failure teaches the wrong thing about a repository whose whole subject is
+  // evidence.
+  "postCreateCommand": "set -u; echo; ./bin/report-maker doctor || true; echo; echo '\u2500\u2500 the web server suite (305 tests, stdlib only, no pytest) \u2500\u2500'; python3 -m unittest discover -s web/tests || exit 1; echo; echo '\u2500\u2500 the engine suite \u2500\u2500'; echo 'Two failures are expected on Linux today. Neither is anything you did,'; echo 'and both are recorded in the deployment handover:'; echo '  tests/test_render.py         the golden page hashes were recorded on'; echo '                              macOS, whose Didot and Helvetica Neue this'; echo '                              box does not have, so page 1 renders 13 bits'; echo '                              away from a hash that describes a Mac.'; echo '  tests/test_check_symlink.py  engine/check.py:191 calls Path.resolve() on'; echo '                              a symlink loop. Linux raises RuntimeError'; echo '                              there; macOS returns. Same code, two answers.'; echo; make test || echo; echo '\u2500\u2500 ready \u2500\u2500'; echo 'make web        the web version: API on 8787, Vite in front of it'; echo 'make test       the engine suite'; echo 'make web-test   the web server suite'; echo 'make V=examples/demo-vault    build the sample vault end to end'",
+
+  "remoteUser": "vscode",
+
+  // The engine writes into the vault it is pointed at, and `make` writes into
+  // `out/` and `.build/`. Nothing here needs a privileged container.
+  "runArgs": ["--init"]
+}
