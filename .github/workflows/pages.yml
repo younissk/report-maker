@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # First, before anything is compiled. Pages has to be switched on for the
       # repository before a deployment has anywhere to land, and if it is not,
@@ -78,7 +78,7 @@ jobs:
       - name: Enable and configure Pages
         id: pages
         continue-on-error: true
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
         with:
           enablement: true
 
@@ -97,14 +97,14 @@ jobs:
                "plan without Pages: make it public, or upgrade the account."
           exit 1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
       # Pinned rather than ambient: see NODE_VERSION above. The engine reaches
       # for Node only when a diagram needs re-rendering, which is exactly when
       # an unannounced Node bump would change what these pages show.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -121,7 +121,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Cache mermaid-cli
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: examples/demo-vault/.build/mermaid
           key: mermaid-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('engine/config.py', 'examples/demo-vault/report-maker.toml') }}
@@ -384,7 +384,7 @@ jobs:
           raise SystemExit(1 if bad else 0)
           PY
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
@@ -396,4 +396,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
