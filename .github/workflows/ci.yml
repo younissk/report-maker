@@ -73,9 +73,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -84,7 +84,7 @@ jobs:
       # mermaid-cli into the vault's .build/ and running it. Without this the
       # engine picks up whatever Node the image happens to ship, which is the
       # one part of the toolchain that was moving on its own.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -122,7 +122,7 @@ jobs:
       # invalidates it and nothing else does. A miss is slow, never wrong: the
       # engine reinstalls, and a failure to render is caught and skipped.
       - name: Cache mermaid-cli
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: examples/demo-vault/.build/mermaid
           key: mermaid-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('engine/config.py', 'examples/demo-vault/report-maker.toml') }}
@@ -178,7 +178,7 @@ jobs:
       # test_render tells you to go and look at the page. This is how you can.
       - name: Keep the rendered pages when something failed
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rendered-pages-${{ matrix.os }}
           path: |
@@ -193,9 +193,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -229,9 +229,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
